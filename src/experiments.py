@@ -29,12 +29,12 @@ from src.emb.emb import EmbeddingBasedMethod
 from src.rl.graph_search.pn import GraphSearchPolicy
 from src.rl.graph_search.pg import PolicyGradient
 from src.rl.graph_search.rs_pg import RewardShapingPolicyGradient
-from src.utils.ops import flatten
+from src.utils.ops import flatten, to_cuda, device
 
-torch.cuda.set_device(args.gpu)
+# torch.cuda.set_device(args.gpu)
 
 torch.manual_seed(args.seed)
-torch.cuda.manual_seed_all(args.seed)
+# torch.cuda.manual_seed_all(args.seed)
 
 def process_data():
     data_dir = args.data_dir
@@ -347,7 +347,7 @@ def run_ablation_studies(args):
     def set_up_lf_for_inference(args):
         initialize_model_directory(args)
         lf = construct_model(args)
-        lf.cuda()
+        to_cuda(lf)
         lf.batch_size = args.dev_batch_size
         lf.load_checkpoint(get_checkpoint_path(args))
         lf.eval()
@@ -592,10 +592,11 @@ def run_experiment(args):
                     print("\nRandom seed = {}\n".format(random_seed))
                     o_f.write("\nRandom seed = {}\n\n".format(random_seed))
                     torch.manual_seed(random_seed)
-                    torch.cuda.manual_seed_all(args, random_seed)
+                    if 'cuda' in str(device):
+                        torch.cuda.manual_seed_all(args, random_seed)
                     initialize_model_directory(args, random_seed)
                     lf = construct_model(args)
-                    lf.cuda()
+                    to_cuda(lf)
                     train(lf)
                     metrics = inference(lf)
                     hits_at_1s[random_seed] = metrics['test']['hits_at_1']
@@ -741,7 +742,7 @@ def run_experiment(args):
             else:
                 initialize_model_directory(args)
                 lf = construct_model(args)
-                lf.cuda()
+                to_cuda(lf)
 
                 if args.train:
                     train(lf)
@@ -763,4 +764,11 @@ def run_experiment(args):
                     export_error_cases(lf)
 
 if __name__ == '__main__':
+    import shlex
+
+    argString = '''
+     --data_dir data/NELL-995     --train     --model point     --bandwidth 256     --entity_dim 200     --relation_dim 200     --history_dim 200     --history_num_layers 3     --num_rollouts 20     --num_rollout_steps 3     --bucket_interval 5     --num_epochs 1000     --num_wait_epochs 100     --num_peek_epochs 2     --batch_size 128     --train_batch_size 128     --dev_batch_size 16     --margin -1     --learning_rate 0.001     --baseline n/a     --grad_norm 5     --emb_dropout_rate 0.3     --ff_dropout_rate 0.1     --action_dropout_rate 0.3     --action_dropout_anneal_interval 1000          --beta 0.05     --beam_size 128     --num_paths_per_entity -1          --use_action_space_bucketing     --gpu 0
+    '''
+    args = parser.parse_args(shlex.split(argString))
+
     run_experiment(args)

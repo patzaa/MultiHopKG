@@ -15,7 +15,10 @@ from torch.autograd import Variable
 
 EPSILON = float(np.finfo(float).eps)
 HUGE_INT = 1e31
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+def to_cuda(x):
+    return x.cuda() if 'cuda' in str(device) else x
 
 def batch_lookup(M, idx, vector_output=True):
     """
@@ -102,11 +105,11 @@ def format_rule(rule, kg):
 
 
 def ones_var_cuda(s, requires_grad=False):
-    return Variable(torch.ones(s), requires_grad=requires_grad).cuda()
+    return to_cuda(Variable(torch.ones(s), requires_grad=requires_grad))
 
 
 def zeros_var_cuda(s, requires_grad=False):
-    return Variable(torch.zeros(s), requires_grad=requires_grad).cuda()
+    return to_cuda(Variable(torch.zeros(s), requires_grad=requires_grad))
 
 
 def int_fill_var_cuda(s, value, requires_grad=False):
@@ -114,11 +117,11 @@ def int_fill_var_cuda(s, value, requires_grad=False):
 
 
 def int_var_cuda(x, requires_grad=False):
-    return Variable(x, requires_grad=requires_grad).long().cuda()
+    return to_cuda(Variable(x, requires_grad=requires_grad).long())
 
 
 def var_cuda(x, requires_grad=False):
-    return Variable(x, requires_grad=requires_grad).cuda()
+    return to_cuda(Variable(x, requires_grad=requires_grad))
 
 
 def var_to_numpy(x):
