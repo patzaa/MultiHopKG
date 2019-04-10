@@ -1,2 +1,4 @@
+torch
+numpy
 tqdm==4.9.0
 matplotlib==2.1.2
