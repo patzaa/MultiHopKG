@@ -12,12 +12,13 @@ import torch
 from src.learn_framework import LFramework
 import src.rl.graph_search.beam_search as search
 import src.utils.ops as ops
+from src.rl.graph_search.graph_walk_agent import GraphWalkAgent
 from src.utils.ops import int_fill_var_cuda, var_cuda, zeros_var_cuda
 
 
 class PolicyGradient(LFramework):
-    def __init__(self, args, kg, pn):
-        super(PolicyGradient, self).__init__(args, kg, pn)
+    def __init__(self, args, kg, agent:GraphWalkAgent):
+        super(PolicyGradient, self).__init__(args, kg, agent)
 
         # Training hyperparameters
         self.relation_only = args.relation_only
@@ -103,7 +104,7 @@ class PolicyGradient(LFramework):
     def rollout(self, e_s, q, e_t, num_steps, visualize_action_probs=False):
         """
         Perform multi-step rollout from the source entity conditioned on the query relation.
-        :param pn: Policy network.
+        :param agent: Policy network.
         :param e_s: (Variable:batch) source entity indices.
         :param q: (Variable:batch) query relation indices.
         :param e_t: (Variable:batch) target entity indices.
@@ -115,7 +116,7 @@ class PolicyGradient(LFramework):
         :return action_entropy: Entropy regularization term.
         """
         assert (num_steps > 0)
-        kg, pn = self.kg, self.mdl
+        kg, agent = self.kg, self.agent
 
         # Initialization
         log_action_probs = []
@@ -125,16 +126,16 @@ class PolicyGradient(LFramework):
         path_components = []
 
         path_trace = [(r_s, e_s)]
-        pn.initialize_path((r_s, e_s), kg)
+        agent.initialize_path((r_s, e_s), kg)
 
         for t in range(num_steps):
             last_r, e = path_trace[-1]
             obs = [e_s, q, e_t, t==(num_steps-1), last_r, seen_nodes]
-            db_outcomes, inv_offset, policy_entropy = pn.transit(
+            db_outcomes, inv_offset, policy_entropy = agent.transit(
                 e, obs, kg, use_action_space_bucketing=self.use_action_space_bucketing)
             sample_outcome = self.sample_action(db_outcomes, inv_offset)
             action = sample_outcome['action_sample']
-            pn.update_path(action, kg)
+            agent.update_path(action, kg)
             action_prob = sample_outcome['action_prob']
             log_action_probs.append(ops.safe_log(action_prob))
             action_entropy.append(policy_entropy)
@@ -220,7 +221,7 @@ class PolicyGradient(LFramework):
         return sample_outcome
 
     def predict(self, mini_batch, verbose=False):
-        kg, pn = self.kg, self.mdl
+        kg, pn = self.kg, self.agent
         e1, e2, r = self.format_batch(mini_batch)
         beam_search_output = search.beam_search(
             pn, e1, r, e2, kg, self.num_rollout_steps, self.beam_size)

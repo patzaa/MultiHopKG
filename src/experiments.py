@@ -26,9 +26,9 @@ from src.knowledge_graph import KnowledgeGraph
 from src.emb.fact_network import ComplEx, ConvE, DistMult
 from src.emb.fact_network import get_conve_kg_state_dict, get_complex_kg_state_dict, get_distmult_kg_state_dict
 from src.emb.emb import EmbeddingBasedMethod
-from src.rl.graph_search.pn import GraphSearchPolicy
-from src.rl.graph_search.pg import PolicyGradient
-from src.rl.graph_search.rs_pg import RewardShapingPolicyGradient
+from src.rl.graph_search.graph_walk_agent import GraphWalkAgent
+from src.rl.graph_search.policy_gradient_reinforcement import PolicyGradient
+from src.rl.graph_search.rewardshaping_policy_gradient_reinforcer import RewardShapingPolicyGradient
 from src.utils.ops import flatten, to_cuda, device
 
 # torch.cuda.set_device(args.gpu)
@@ -185,10 +185,10 @@ def construct_model(args):
         kg.load_fuzzy_facts()
 
     if args.model in ['point', 'point.gc']:
-        pn = GraphSearchPolicy(args)
+        pn = GraphWalkAgent(args)
         lf = PolicyGradient(args, kg, pn)
     elif args.model.startswith('point.rs'):
-        pn = GraphSearchPolicy(args)
+        pn = GraphWalkAgent(args)
         fn_model = args.model.split('.')[2]
         fn_args = copy.deepcopy(args)
         fn_args.model = fn_model

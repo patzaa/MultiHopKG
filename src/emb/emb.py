@@ -19,8 +19,8 @@ from src.utils.ops import var_cuda, int_var_cuda, int_fill_var_cuda
 
 
 class EmbeddingBasedMethod(LFramework):
-    def __init__(self, args, kg, mdl, secondary_kg=None, tertiary_kg=None):
-        super(EmbeddingBasedMethod, self).__init__(args, kg, mdl)
+    def __init__(self, args, kg, agent, secondary_kg=None, tertiary_kg=None):
+        super(EmbeddingBasedMethod, self).__init__(args, kg, agent)
         self.num_negative_samples = args.num_negative_samples
         self.label_smoothing_epsilon = args.label_smoothing_epsilon
         self.loss_fun = nn.BCELoss()
@@ -30,7 +30,7 @@ class EmbeddingBasedMethod(LFramework):
         self.tertiary_kg = tertiary_kg
 
     def forward_fact(self, examples):
-        kg, mdl = self.kg, self.mdl
+        kg, mdl = self.kg, self.agent
         pred_scores = []
         for example_id in tqdm(range(0, len(examples), self.batch_size)):
             mini_batch = examples[example_id:example_id + self.batch_size]
@@ -43,7 +43,7 @@ class EmbeddingBasedMethod(LFramework):
         return torch.cat(pred_scores)
 
     def loss(self, mini_batch):
-        kg, mdl = self.kg, self.mdl
+        kg, mdl = self.kg, self.agent
         # compute object training loss
         e1, e2, r = self.format_batch(mini_batch, num_labels=kg.num_entities)
         e2_label = ((1 - self.label_smoothing_epsilon) * e2) + (1.0 / e2.size(1))
@@ -55,7 +55,7 @@ class EmbeddingBasedMethod(LFramework):
         return loss_dict
 
     def predict(self, mini_batch, verbose=False):
-        kg, mdl = self.kg, self.mdl
+        kg, mdl = self.kg, self.agent
         e1, e2, r = self.format_batch(mini_batch)
         if self.model == 'hypere':
             pred_scores = mdl.forward(e1, r, kg, [self.secondary_kg])
@@ -107,7 +107,7 @@ class EmbeddingBasedMethod(LFramework):
         """
         fn_state_dict_path = os.path.join(self.model_dir, 'fn_state_dict')
         fn_kg_state_dict_path = os.path.join(self.model_dir, 'fn_kg_state_dict')
-        torch.save(self.mdl.state_dict(), fn_state_dict_path)
+        torch.save(self.agent.state_dict(), fn_state_dict_path)
         print('Fact network parameters export to {}'.format(fn_state_dict_path))
         torch.save(self.kg.state_dict(), fn_kg_state_dict_path)
         print('Knowledge graph embeddings export to {}'.format(fn_kg_state_dict_path))
@@ -116,7 +116,7 @@ class EmbeddingBasedMethod(LFramework):
         """
         Export high confidence facts according to the model.
         """
-        kg, mdl = self.kg, self.mdl
+        kg, mdl = self.kg, self.agent
 
         # Gather all possible (subject, relation) and (relation, object) pairs
         sub_rel, rel_obj = {}, {}

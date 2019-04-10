@@ -6,7 +6,7 @@
  
  Base learning framework.
 """
-
+import abc
 import os
 import random
 import shutil
@@ -25,7 +25,7 @@ import src.utils.ops as ops
 
 
 class LFramework(nn.Module):
-    def __init__(self, args, kg, mdl):
+    def __init__(self, args, kg, agent):
         super(LFramework, self).__init__()
         self.args = args
         self.data_dir = args.data_dir
@@ -50,7 +50,7 @@ class LFramework(nn.Module):
         self.run_analysis = args.run_analysis
 
         self.kg = kg
-        self.mdl = mdl
+        self.agent = agent
         print('{} module created'.format(self.model))
 
     def print_all_model_parameters(self):
@@ -191,6 +191,10 @@ class LFramework(nn.Module):
                             o_f.write('{}\n'.format(hit_ratio))
                         with open(fn_ratio_file, 'a') as o_f:
                             o_f.write('{}\n'.format(fn_ratio))
+
+    @abc.abstractmethod
+    def loss(self, mini_batch):
+        raise NotImplementedError
 
     def forward(self, examples, verbose=False):
         pred_scores = []

@@ -13,14 +13,14 @@ import torch
 
 from src.emb.fact_network import get_conve_nn_state_dict, get_conve_kg_state_dict, \
     get_complex_kg_state_dict, get_distmult_kg_state_dict
-from src.rl.graph_search.pg import PolicyGradient
+from src.rl.graph_search.policy_gradient_reinforcement import PolicyGradient
 import src.utils.ops as ops
 from src.utils.ops import zeros_var_cuda
 
 
 class RewardShapingPolicyGradient(PolicyGradient):
-    def __init__(self, args, kg, pn, fn_kg, fn, fn_secondary_kg=None):
-        super(RewardShapingPolicyGradient, self).__init__(args, kg, pn)
+    def __init__(self, args, kg, agent, fn_kg, fn, fn_secondary_kg=None):
+        super(RewardShapingPolicyGradient, self).__init__(args, kg, agent)
         self.reward_shaping_threshold = args.reward_shaping_threshold
 
         # Fact network modules

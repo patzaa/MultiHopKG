@@ -15,9 +15,9 @@ import src.utils.ops as ops
 from src.utils.ops import var_cuda, zeros_var_cuda
 
 
-class GraphSearchPolicy(nn.Module):
+class GraphWalkAgent(nn.Module):
     def __init__(self, args):
-        super(GraphSearchPolicy, self).__init__()
+        super(GraphWalkAgent, self).__init__()
         self.model = args.model
         self.relation_only = args.relation_only
 
