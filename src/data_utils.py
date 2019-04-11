@@ -270,8 +270,20 @@ def prepare_kb_envrioment(raw_kb_path, train_path, dev_path, test_path, test_mod
     type2id, id2type = load_index(os.path.join(data_dir, 'type2id.txt'))
 
     removed_triples = set(removed_triples)
-    adj_list = collections.defaultdict(collections.defaultdict)
     entity2typeid = [0 for i in range(len(entity2id))]
+    adj_list = build_adjaceny_list(raw_kb_triples, keep_triples, removed_triples, entity2id, entity2typeid, get_type,
+                                   id2entity, id2relation, relation2id, type2id, add_reverse_relations)
+    # Save adjacency list
+    adj_list_path = os.path.join(data_dir, 'adj_list.pkl')
+    with open(adj_list_path, 'wb') as o_f:
+        pickle.dump(dict(adj_list), o_f)
+    with open(os.path.join(data_dir, 'entity2typeid.pkl'), 'wb') as o_f:
+        pickle.dump(entity2typeid, o_f)
+
+def build_adjaceny_list(raw_kb_triples, keep_triples, removed_triples, entity2id, entity2typeid, get_type, id2entity,
+                        id2relation, relation2id, type2id, add_reverse_relations):
+    adj_list = collections.defaultdict(
+        collections.defaultdict)  # adjaceny-list == "subject-id TO relation-id TO set of objects"-Mapping
     num_facts = 0
     for line in set(raw_kb_triples + keep_triples):
         e1, e2, r = line.strip().split()
@@ -304,12 +316,7 @@ def prepare_kb_envrioment(raw_kb_path, train_path, dev_path, test_path, test_mod
                 adj_list[e2_id][inv_r_id].add(e1_id)
                 num_facts += 1
     print('{} facts processed'.format(num_facts))
-    # Save adjacency list
-    adj_list_path = os.path.join(data_dir, 'adj_list.pkl')
-    with open(adj_list_path, 'wb') as o_f:
-        pickle.dump(dict(adj_list), o_f)
-    with open(os.path.join(data_dir, 'entity2typeid.pkl'), 'wb') as o_f:
-        pickle.dump(entity2typeid, o_f)
+    return adj_list
 
 def get_seen_queries(data_dir, entity_index_path, relation_index_path):
     entity2id, _ = load_index(entity_index_path)
