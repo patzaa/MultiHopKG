@@ -12,6 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import src.utils.ops as ops
+from src.knowledge_graph import KnowledgeGraph
 from src.utils.ops import var_cuda, zeros_var_cuda
 
 
@@ -46,16 +47,15 @@ class GraphWalkAgent(nn.Module):
         self.fn = None
         self.fn_kg = None
 
-    def transit(self, e, obs, kg, use_action_space_bucketing=True, merge_aspace_batching_outcome=False):
+    def transit(self, current_entity, obs, kg, use_action_space_bucketing=True, merge_aspace_batching_outcome=False):
         """
         Compute the next action distribution based on
             (a) the current node (entity) in KG and the query relation
             (b) action history representation
-        :param e: agent location (node) at step t.
+        :param current_entity: agent location (node) at step t.
         :param obs: agent observation at step t.
             e_s: source node
             q: query relation
-            e_t: target node
             last_step: If set, the agent is carrying out the last step.
             last_r: label of edge traversed in the previous step
             seen_nodes: notes seen on the paths
@@ -75,7 +75,7 @@ class GraphWalkAgent(nn.Module):
                 action_dist: (Batch) distribution over actions.
                 entropy: (Batch) entropy of action distribution.
         """
-        e_s, q, e_t, last_step, last_r, seen_nodes = obs
+        e_s, q, _, last_step, last_r, seen_nodes = obs
 
         # Representation of the current state (current node and other observations)
         Q = kg.get_relation_embeddings(q)
@@ -84,10 +84,10 @@ class GraphWalkAgent(nn.Module):
             X = torch.cat([H, Q], dim=-1)
         elif self.relation_only_in_path:
             E_s = kg.get_entity_embeddings(e_s)
-            E = kg.get_entity_embeddings(e)
+            E = kg.get_entity_embeddings(current_entity)
             X = torch.cat([E, H, E_s, Q], dim=-1)
         else:
-            E = kg.get_entity_embeddings(e)
+            E = kg.get_entity_embeddings(current_entity)
             X = torch.cat([E, H, Q], dim=-1)
 
         # MLP
@@ -124,7 +124,7 @@ class GraphWalkAgent(nn.Module):
             db_outcomes = []
             entropy_list = []
             references = []
-            db_action_spaces, db_references = self.get_action_space_in_buckets(e, obs, kg)
+            db_action_spaces, db_references = self.get_action_space_in_buckets(current_entity, obs, kg)
             for action_space_b, reference_b in zip(db_action_spaces, db_references):
                 X2_b = X2[reference_b, :]
                 action_dist_b, entropy_b = policy_nn_fun(X2_b, action_space_b)
@@ -142,7 +142,13 @@ class GraphWalkAgent(nn.Module):
                 db_outcomes = [(action_space, action_dist)]
                 inv_offset = None
         else:
-            action_space = self.get_action_space(e, obs, kg)
+            def get_action_space(e, obs, kg):
+                r_space = kg.action_space['relation-space'][e]
+                e_space = kg.action_space['entity-space'][e]
+                action_mask = kg.action_space['action-mask'][e]
+                return self.apply_action_masks(r_space, e_space, action_mask, e, obs, kg)
+
+            action_space = get_action_space(current_entity, obs, kg)
             action_dist, entropy = policy_nn_fun(X2, action_space)
             db_outcomes = [(action_space, action_dist)]
             inv_offset = None
@@ -188,7 +194,7 @@ class GraphWalkAgent(nn.Module):
 
         self.path.append(self.path_encoder(action_embedding.unsqueeze(1), self.path[-1])[1])
 
-    def get_action_space_in_buckets(self, e, obs, kg, collapse_entities=False):
+    def get_action_space_in_buckets(self, e, obs, kg:KnowledgeGraph, collapse_entities=False):
         """
         To compute the search operation in batch, we group the action spaces of different states
         (i.e. the set of outgoing edges of different nodes) into buckets based on their sizes to
@@ -233,46 +239,38 @@ class GraphWalkAgent(nn.Module):
         if collapse_entities:
             raise NotImplementedError
         else:
-            entity2bucketid = kg.entity2bucketid[e.tolist()]
-            key1 = entity2bucketid[:, 0]
-            key2 = entity2bucketid[:, 1]
-            batch_ref = {}
+            entity2bucketid = kg.bucket_inbucket_ids[e.tolist()]
+            bucket_ids = entity2bucketid[:, 0]
+            inbucket_ids = entity2bucketid[:, 1]
+            bucketkey2entities = {}
             for i in range(len(e)):
-                key = int(key1[i])
-                if not key in batch_ref:
-                    batch_ref[key] = []
-                batch_ref[key].append(i)
-            for key in batch_ref:
-                action_space = kg.action_space_buckets[key]
-                # l_batch_refs: ids of the examples in the current batch of examples
-                # g_bucket_ids: ids of the examples in the corresponding KG action space bucket
-                l_batch_refs = batch_ref[key]
-                g_bucket_ids = key2[l_batch_refs].tolist()
-                r_space_b = action_space[0][0][g_bucket_ids]
-                e_space_b = action_space[0][1][g_bucket_ids]
-                action_mask_b = action_space[1][g_bucket_ids]
-                e_b = e[l_batch_refs]
-                last_r_b = last_r[l_batch_refs]
-                e_s_b = e_s[l_batch_refs]
-                q_b = q[l_batch_refs]
-                e_t_b = e_t[l_batch_refs]
-                seen_nodes_b = seen_nodes[l_batch_refs]
-                obs_b = [e_s_b, q_b, e_t_b, last_step, last_r_b, seen_nodes_b]
-                action_space_b = ((r_space_b, e_space_b), action_mask_b)
-                action_space_b = self.apply_action_masks(action_space_b, e_b, obs_b, kg)
+                b_key = int(bucket_ids[i])
+                if not b_key in bucketkey2entities:
+                    bucketkey2entities[b_key] = []
+                bucketkey2entities[b_key].append(i)
+            for b_key,entities_inthisbucket in bucketkey2entities.items():
+                bucket_action_space = kg.action_space_buckets[b_key]
+                inbucket_ids_of_entities_inthisbucket = inbucket_ids[entities_inthisbucket].tolist()
+                e_b = e[entities_inthisbucket]
+
+                obs_b = [e_s[entities_inthisbucket],
+                         q[entities_inthisbucket],
+                         e_t[entities_inthisbucket],
+                         last_step,
+                         last_r[entities_inthisbucket],
+                         seen_nodes[entities_inthisbucket]]
+                action_space_b = self.apply_action_masks(
+                    bucket_action_space['relation-space'][inbucket_ids_of_entities_inthisbucket],
+                    bucket_action_space['entity-space'][inbucket_ids_of_entities_inthisbucket],
+                    bucket_action_space['action-mask'][inbucket_ids_of_entities_inthisbucket],
+                    e_b, obs_b, kg)
                 db_action_spaces.append(action_space_b)
-                db_references.append(l_batch_refs)
+                db_references.append(entities_inthisbucket)
 
         return db_action_spaces, db_references
 
-    def get_action_space(self, e, obs, kg):
-        r_space, e_space = kg.action_space[0][0][e], kg.action_space[0][1][e]
-        action_mask = kg.action_space[1][e]
-        action_space = ((r_space, e_space), action_mask)
-        return self.apply_action_masks(action_space, e, obs, kg)
+    def apply_action_masks(self, r_space, e_space, action_mask, e, obs, kg):
 
-    def apply_action_masks(self, action_space, e, obs, kg):
-        (r_space, e_space), action_mask = action_space
         e_s, q, e_t, last_step, last_r, seen_nodes = obs
 
         # Prevent the agent from selecting the ground truth edge

@@ -130,7 +130,7 @@ class PolicyGradient(LFramework):
 
         for t in range(num_steps):
             last_r, e = path_trace[-1]
-            obs = [e_s, q, e_t, t==(num_steps-1), last_r, seen_nodes]
+            obs = [e_s, q, e_t, t==(num_steps-1), last_r, seen_nodes] # e_t is needed to form the ground_truth_edge_mask
             db_outcomes, inv_offset, policy_entropy = agent.transit(
                 e, obs, kg, use_action_space_bucketing=self.use_action_space_bucketing)
             sample_outcome = self.sample_action(db_outcomes, inv_offset)
