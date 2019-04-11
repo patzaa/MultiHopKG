@@ -120,11 +120,10 @@ class KnowledgeGraph(nn.Module):
         
         def get_action_space(e1):
             action_space = []
-            if e1 in self.adj_list:
-                for r in self.adj_list[e1]:
-                    targets = self.adj_list[e1][r]
-                    for e2 in targets:
-                        action_space.append((r, e2))
+            if e1 in self.adj_list: # spos
+                action_space = [(r,e2)
+                                for r in self.adj_list[e1]
+                                for e2 in self.adj_list[e1][r]]
                 if len(action_space) + 1 >= self.bandwidth:
                     # Base graph pruning
                     sorted_action_space = \
@@ -149,7 +148,11 @@ class KnowledgeGraph(nn.Module):
                     r_space[i, j] = r
                     e_space[i, j] = e
                     action_mask[i, j] = 1
-            return (int_var_cuda(r_space), int_var_cuda(e_space)), var_cuda(action_mask)
+            return {
+                'relation-space':int_var_cuda(r_space),
+                'entity-space':int_var_cuda(e_space),
+                'action-mask':var_cuda(action_mask)
+            }
 
         def vectorize_unique_r_space(unique_r_space_list, unique_r_space_size, volatile):
             bucket_size = len(unique_r_space_list)
@@ -165,21 +168,22 @@ class KnowledgeGraph(nn.Module):
             """
             self.action_space_buckets = {}
             action_space_buckets_discrete = collections.defaultdict(list)
-            self.entity2bucketid = torch.zeros(self.num_entities, 2).long()
+            self.bucket_inbucket_ids = torch.zeros(self.num_entities, 2).long()
             num_facts_saved_in_action_table = 0
             for e1 in range(self.num_entities):
                 action_space = get_action_space(e1)
-                key = int(len(action_space) / self.args.bucket_interval) + 1
-                self.entity2bucketid[e1, 0] = key
-                self.entity2bucketid[e1, 1] = len(action_space_buckets_discrete[key])
-                action_space_buckets_discrete[key].append(action_space)
+                b_id = int(len(action_space) / self.args.bucket_interval) + 1
+                self.bucket_inbucket_ids[e1, 0] = b_id
+                position_in_bucket = len(action_space_buckets_discrete[b_id])
+                self.bucket_inbucket_ids[e1, 1] = position_in_bucket
+                action_space_buckets_discrete[b_id].append(action_space)
                 num_facts_saved_in_action_table += len(action_space)
             print('Sanity check: {} facts saved in action table'.format(
                 num_facts_saved_in_action_table - self.num_entities))
-            for key in action_space_buckets_discrete:
-                print('Vectorizing action spaces bucket {}...'.format(key))
-                self.action_space_buckets[key] = vectorize_action_space(
-                    action_space_buckets_discrete[key], key * self.args.bucket_interval)
+            for b_id in action_space_buckets_discrete:
+                print('Vectorizing action spaces bucket {}...'.format(b_id))
+                self.action_space_buckets[b_id] = vectorize_action_space(
+                    action_space_buckets_discrete[b_id], b_id * self.args.bucket_interval)
         else:
             action_space_list = []
             max_num_actions = 0
