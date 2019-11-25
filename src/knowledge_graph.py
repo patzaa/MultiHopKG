@@ -10,7 +10,7 @@
 import collections
 import os
 import pickle
-from typing import NamedTuple, Dict
+from typing import NamedTuple, Dict, List
 
 import torch
 import torch.nn as nn
@@ -23,25 +23,32 @@ import src.utils.ops as ops
 from src.utils.ops import int_var_cuda, var_cuda
 
 
-def action_space_generator(num_entities, e1_to_r_to_e2, bandwidth, page_rank_scores):
-    def get_action_space(e1):
-        action_space = []
-        if e1 in e1_to_r_to_e2:  # spos
-            action_space = [
-                (r, e2) for r in e1_to_r_to_e2[e1] for e2 in e1_to_r_to_e2[e1][r]
-            ]
-            if len(action_space) + 1 >= bandwidth:
-                # Base graph pruning
-                sorted_action_space = sorted(
-                    action_space, key=lambda x: page_rank_scores[x[1]], reverse=True
-                )
-                action_space = sorted_action_space[:bandwidth]
-        action_space.insert(0, (NO_OP_RELATION_ID, e1))
-        return action_space
+class Direction(NamedTuple):
+    rel: int
+    ent: int
 
-    for e1 in range(num_entities):
-        action_space = get_action_space(e1)
-        yield action_space
+class Fork(NamedTuple):
+    ent:int
+    directions:List[Direction]
+
+def build_forks(
+    num_entities, e1_to_r_to_e2, bandwidth, page_rank_scores
+) -> List[Fork]:
+    def get_action_space(e1):
+        directions = [
+            Direction(r, e2) for r in e1_to_r_to_e2[e1] for e2 in e1_to_r_to_e2[e1][r]
+        ]
+        if len(directions) + 1 >= bandwidth:
+            # Base graph pruning
+            sorted_action_space = sorted(
+                directions, key=lambda x: page_rank_scores[x.ent], reverse=True
+            )
+            directions = sorted_action_space[:bandwidth]
+
+        directions.insert(0, Direction(NO_OP_RELATION_ID, e1))
+        return directions
+
+    return [Fork(e1, get_action_space(e1)) for e1 in range(num_entities)]
 
 
 def vectorize_space(action_space_list, action_space_size, dummy_r, dummy_e):
@@ -59,18 +66,19 @@ def vectorize_space(action_space_list, action_space_size, dummy_r, dummy_e):
     )
 
 
-def build_buckets(action_spaces_g, num_entities, args, dummy_r, dummy_e):
-
+def build_buckets(
+    forks: List[Fork], num_entities, args, dummy_r, dummy_e
+):
     action_space_buckets_discrete = collections.defaultdict(list)
     bucket_inbucket_ids = torch.zeros(num_entities, 2).long()
     num_facts_saved_in_action_table = 0
-    for e1, action_space in enumerate(action_spaces_g):
-        b_id = int(len(action_space) / args.bucket_interval) + 1
-        bucket_inbucket_ids[e1, 0] = b_id
+    for fo in forks:
+        b_id = int(len(fo.directions) / args.bucket_interval) + 1
+        bucket_inbucket_ids[fo.ent, 0] = b_id
         position_in_bucket = len(action_space_buckets_discrete[b_id])
-        bucket_inbucket_ids[e1, 1] = position_in_bucket
-        action_space_buckets_discrete[b_id].append(action_space)
-        num_facts_saved_in_action_table += len(action_space)
+        bucket_inbucket_ids[fo.ent, 1] = position_in_bucket
+        action_space_buckets_discrete[b_id].append(fo.directions)
+        num_facts_saved_in_action_table += len(fo.directions)
     print(
         "Sanity check: {} facts saved in action table".format(
             num_facts_saved_in_action_table - num_entities
@@ -212,11 +220,11 @@ class KnowledgeGraph(nn.Module):
                 self.e1_to_r_to_e2 = pickle.load(f)
             self.preprocess_knowledge_graph(data_dir)
 
-    def get_bucket_and_inbucket_ids(self, entities:torch.Tensor):
+    def get_bucket_and_inbucket_ids(self, entities: torch.Tensor):
         entity2bucketid = self._bucket_inbucket_ids[entities.tolist()]
         bucket_ids = entity2bucketid[:, 0]
         inbucket_ids = entity2bucketid[:, 1]
-        return bucket_ids,inbucket_ids
+        return bucket_ids, inbucket_ids
 
     def preprocess_knowledge_graph(self, data_dir):
 
@@ -226,12 +234,18 @@ class KnowledgeGraph(nn.Module):
             os.path.join(data_dir, "raw.pgrk"), self.entity2id
         )
 
-        action_spaces_g = action_space_generator(
-            self.num_entities, self.e1_to_r_to_e2, self.bandwidth, page_rank_scores
+        forks = build_forks(
+            self.num_entities,
+            {
+                **self.e1_to_r_to_e2,
+                **{self.entity2id[k]:{}  for k in ["DUMMY_ENTITY", "NO_OP_ENTITY"]},
+            },
+            self.bandwidth,
+            page_rank_scores,
         )
         if self.args.use_action_space_bucketing:
             self._bucket_inbucket_ids, self.action_space_buckets = build_buckets(
-                action_spaces_g,
+                forks,
                 self.num_entities,
                 self.args,
                 self.dummy_r,
@@ -239,44 +253,44 @@ class KnowledgeGraph(nn.Module):
             )
         else:
             assert False
-            self.build_action_space(action_spaces_g)
+            # self.build_action_space(list_of_directions)
 
-    def build_action_space(self, action_spaces_g):
-        def get_unique_r_space(e1):
-            if e1 in self.e1_to_r_to_e2:
-                return list(self.e1_to_r_to_e2[e1].keys())
-            else:
-                return []
-
-        def vectorize_unique_r_space(
-            unique_r_space_list, unique_r_space_size, volatile
-        ):
-            bucket_size = len(unique_r_space_list)
-            unique_r_space = (
-                torch.zeros(bucket_size, unique_r_space_size) + self.dummy_r
-            )
-            for i, u_r_s in enumerate(unique_r_space_list):
-                for j, r in enumerate(u_r_s):
-                    unique_r_space[i, j] = r
-            return int_var_cuda(unique_r_space)
-
-        action_space_list = list(action_spaces_g)
-        max_num_actions = max([len(a) for a in action_space_list])
-        print("Vectorizing action spaces...")
-        self.action_space = vectorize_space(
-            action_space_list, max_num_actions, self.dummy_r, self.dummy_e
-        )
-        if self.args.model.startswith("rule"):
-            unique_r_space_list = []
-            max_num_unique_rs = 0
-            for e1 in sorted(self.e1_to_r_to_e2.keys()):
-                unique_r_space = get_unique_r_space(e1)
-                unique_r_space_list.append(unique_r_space)
-                if len(unique_r_space) > max_num_unique_rs:
-                    max_num_unique_rs = len(unique_r_space)
-            self.unique_r_space = vectorize_unique_r_space(
-                unique_r_space_list, max_num_unique_rs
-            )
+    # def build_action_space(self, action_spaces_g):
+    #     def get_unique_r_space(e1):
+    #         if e1 in self.e1_to_r_to_e2:
+    #             return list(self.e1_to_r_to_e2[e1].keys())
+    #         else:
+    #             return []
+    #
+    #     def vectorize_unique_r_space(
+    #         unique_r_space_list, unique_r_space_size, volatile
+    #     ):
+    #         bucket_size = len(unique_r_space_list)
+    #         unique_r_space = (
+    #             torch.zeros(bucket_size, unique_r_space_size) + self.dummy_r
+    #         )
+    #         for i, u_r_s in enumerate(unique_r_space_list):
+    #             for j, r in enumerate(u_r_s):
+    #                 unique_r_space[i, j] = r
+    #         return int_var_cuda(unique_r_space)
+    #
+    #     action_space_list = list(action_spaces_g)
+    #     max_num_actions = max([len(a) for a in action_space_list])
+    #     print("Vectorizing action spaces...")
+    #     self.action_space = vectorize_space(
+    #         action_space_list, max_num_actions, self.dummy_r, self.dummy_e
+    #     )
+    #     if self.args.model.startswith("rule"):
+    #         unique_r_space_list = []
+    #         max_num_unique_rs = 0
+    #         for e1 in sorted(self.e1_to_r_to_e2.keys()):
+    #             unique_r_space = get_unique_r_space(e1)
+    #             unique_r_space_list.append(unique_r_space)
+    #             if len(unique_r_space) > max_num_unique_rs:
+    #                 max_num_unique_rs = len(unique_r_space)
+    #         self.unique_r_space = vectorize_unique_r_space(
+    #             unique_r_space_list, max_num_unique_rs
+    #         )
 
     def load_all_answers(self, data_dir, add_reversed_edges=False):
         def add_subject(e1, e2, r, d):
