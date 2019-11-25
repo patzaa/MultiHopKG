@@ -9,6 +9,7 @@
 
 import torch
 
+from src.knowledge_graph import KnowledgeGraph
 from src.learn_framework import LFramework
 import src.rl.graph_search.beam_search as search
 import src.utils.ops as ops
@@ -17,7 +18,7 @@ from src.utils.ops import int_fill_var_cuda, var_cuda, zeros_var_cuda
 
 
 class PolicyGradient(LFramework):
-    def __init__(self, args, kg, agent: GraphWalkAgent):
+    def __init__(self, args, kg:KnowledgeGraph, agent: GraphWalkAgent):
         super(PolicyGradient, self).__init__(args, kg, agent)
 
         # Training hyperparameters

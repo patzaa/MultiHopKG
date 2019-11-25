@@ -82,20 +82,10 @@ class GraphWalkAgent(nn.Module):
                 action_dist: (Batch) distribution over actions.
                 entropy: (Batch) entropy of action distribution.
         """
-        e_s, query_relation, _, last_step, last_r, seen_nodes = obs
+        e_s, query_relation, _, _, _, _ = obs
 
         # Representation of the current state (current node and other observations)
-        embedded_q_rel = kg.get_relation_embeddings(query_relation)
-        encoded_history = self.path[-1][0][-1, :, :]
-        if self.relation_only:
-            X = torch.cat([encoded_history, embedded_q_rel], dim=-1)
-        elif self.relation_only_in_path:
-            E_s = kg.get_entity_embeddings(e_s)
-            E = kg.get_entity_embeddings(current_entity)
-            X = torch.cat([E, encoded_history, E_s, embedded_q_rel], dim=-1)
-        else:
-            E = kg.get_entity_embeddings(current_entity)
-            X = torch.cat([E, encoded_history, embedded_q_rel], dim=-1)
+        X = self.encode_history(current_entity, e_s, kg, query_relation)
 
         # MLP
         X = self.W1(X)
@@ -115,6 +105,53 @@ class GraphWalkAgent(nn.Module):
             # action_dist = ops.weighted_softmax(torch.squeeze(A @ torch.unsqueeze(X2, 2), 2), action_mask)
             return action_dist, ops.entropy(action_dist)
 
+        if use_action_space_bucketing:
+            db_outcomes, entropy, inv_offset = self.do_it_with_bucketing(
+                X2,
+                current_entity,
+                kg,
+                merge_aspace_batching_outcome,
+                obs,
+                policy_nn_fun,
+            )
+        else:
+
+            db_outcomes, entropy, inv_offset = self.do_it_without_bucketing(
+                X2, current_entity, kg, obs, policy_nn_fun
+            )
+
+        return db_outcomes, inv_offset, entropy
+
+    def encode_history(self, current_entity, e_s, kg, query_relation):
+        embedded_q_rel = kg.get_relation_embeddings(query_relation)
+        encoded_history = self.path[-1][0][-1, :, :]
+        if self.relation_only:
+            X = torch.cat([encoded_history, embedded_q_rel], dim=-1)
+        elif self.relation_only_in_path:
+            E_s = kg.get_entity_embeddings(e_s)
+            E = kg.get_entity_embeddings(current_entity)
+            X = torch.cat([E, encoded_history, E_s, embedded_q_rel], dim=-1)
+        else:
+            E = kg.get_entity_embeddings(current_entity)
+            X = torch.cat([E, encoded_history, embedded_q_rel], dim=-1)
+        return X
+
+    def do_it_without_bucketing(self, X2, current_entity, kg, obs, policy_nn_fun):
+        def get_action_space(e, obs, kg):
+            r_space = kg.action_space["relation-space"][e]
+            e_space = kg.action_space["entity-space"][e]
+            action_mask = kg.action_space["action-mask"][e]
+            return self.apply_action_masks(r_space, e_space, action_mask, e, obs, kg)
+
+        action_space = get_action_space(current_entity, obs, kg)
+        action_dist, entropy = policy_nn_fun(X2, action_space)
+        db_outcomes = [(action_space, action_dist)]
+        inv_offset = None
+        return db_outcomes, entropy, inv_offset
+
+    def do_it_with_bucketing(
+        self, X2, current_entity, kg, merge_aspace_batching_outcome, obs, policy_nn_fun
+    ):
         def pad_and_cat_action_space(action_spaces, inv_offset):
             db_r_space, db_e_space, db_action_mask = [], [], []
             for (r_space, e_space), action_mask in action_spaces:
@@ -127,54 +164,31 @@ class GraphWalkAgent(nn.Module):
             action_space = ((r_space, e_space), action_mask)
             return action_space
 
-        if use_action_space_bucketing:
-            """
-            
-            """
-            db_outcomes = []
-            entropy_list = []
-            references = []
-            db_action_spaces, db_references = self.get_action_space_in_buckets(
-                current_entity, obs, kg
-            )
-            for action_space_b, reference_b in zip(db_action_spaces, db_references):
-                X2_b = X2[reference_b, :]
-                action_dist_b, entropy_b = policy_nn_fun(X2_b, action_space_b)
-                references.extend(reference_b)
-                db_outcomes.append((action_space_b, action_dist_b))
-                entropy_list.append(entropy_b)
-            inv_offset = [
-                i for i, _ in sorted(enumerate(references), key=lambda x: x[1])
-            ]
-            entropy = torch.cat(entropy_list, dim=0)[inv_offset]
-            if merge_aspace_batching_outcome:
-                db_action_dist = []
-                for _, action_dist in db_outcomes:
-                    db_action_dist.append(action_dist)
-                action_space = pad_and_cat_action_space(db_action_spaces, inv_offset)
-                action_dist = ops.pad_and_cat(db_action_dist, padding_value=0)[
-                    inv_offset
-                ]
-                db_outcomes = [(action_space, action_dist)]
-                inv_offset = None
-        else:
-
-            def get_action_space(e, obs, kg):
-                r_space = kg.action_space["relation-space"][e]
-                e_space = kg.action_space["entity-space"][e]
-                action_mask = kg.action_space["action-mask"][e]
-                return self.apply_action_masks(
-                    r_space, e_space, action_mask, e, obs, kg
-                )
-
-            action_space = get_action_space(current_entity, obs, kg)
-            action_dist, entropy = policy_nn_fun(X2, action_space)
+        db_outcomes = []
+        entropy_list = []
+        references = []
+        db_action_spaces, db_references = self.get_action_space_in_buckets(
+            current_entity, obs, kg
+        )
+        for action_space_b, reference_b in zip(db_action_spaces, db_references):
+            X2_b = X2[reference_b, :]
+            action_dist_b, entropy_b = policy_nn_fun(X2_b, action_space_b)
+            references.extend(reference_b)
+            db_outcomes.append((action_space_b, action_dist_b))
+            entropy_list.append(entropy_b)
+        inv_offset = [i for i, _ in sorted(enumerate(references), key=lambda x: x[1])]
+        entropy = torch.cat(entropy_list, dim=0)[inv_offset]
+        if merge_aspace_batching_outcome:
+            db_action_dist = []
+            for _, action_dist in db_outcomes:
+                db_action_dist.append(action_dist)
+            action_space = pad_and_cat_action_space(db_action_spaces, inv_offset)
+            action_dist = ops.pad_and_cat(db_action_dist, padding_value=0)[inv_offset]
             db_outcomes = [(action_space, action_dist)]
             inv_offset = None
+        return db_outcomes, entropy, inv_offset
 
-        return db_outcomes, inv_offset, entropy
-
-    def initialize_path(self, init_action, kg):
+    def initialize_path(self, init_action, kg: KnowledgeGraph):
         # [batch_size, action_dim]
         if self.relation_only_in_path:
             init_action_embedding = kg.get_relation_embeddings(init_action[0])
@@ -190,7 +204,7 @@ class GraphWalkAgent(nn.Module):
         )
         self.path = [self.path_encoder(init_action_embedding, (init_h, init_c))[1]]
 
-    def update_path(self, action, kg, offset=None):
+    def update_path(self, action, kg: KnowledgeGraph, offset=None):
         """
         Once an action was selected, update the action history.
         :param action (r, e): (Variable:batch) indices of the most recent action
@@ -310,7 +324,9 @@ class GraphWalkAgent(nn.Module):
 
         return db_action_spaces, db_references
 
-    def apply_action_masks(self, r_space, e_space, action_mask, e, obs, kg):
+    def apply_action_masks(
+        self, r_space, e_space, action_mask, e, obs, kg: KnowledgeGraph
+    ):
 
         e_s, q, e_t, last_step, last_r, seen_nodes = obs
 
@@ -338,7 +354,9 @@ class GraphWalkAgent(nn.Module):
         # action_mask *= (1 - loop_mask_b)
         return (r_space, e_space), action_mask
 
-    def get_ground_truth_edge_mask(self, e, r_space, e_space, e_s, q, e_t, kg):
+    def get_ground_truth_edge_mask(
+        self, e, r_space, e_space, e_s, q, e_t, kg: KnowledgeGraph
+    ):
         ground_truth_edge_mask = (
             (e == e_s).unsqueeze(1)
             * (r_space == q.unsqueeze(1))
@@ -355,7 +373,7 @@ class GraphWalkAgent(nn.Module):
             * (e_s.unsqueeze(1) != kg.dummy_e)
         ).float()
 
-    def get_answer_mask(self, e_space, e_s, q, kg):
+    def get_answer_mask(self, e_space, e_s, q, kg: KnowledgeGraph):
         if kg.args.mask_test_false_negatives:
             answer_vectors = kg.all_object_vectors
         else:
@@ -374,7 +392,7 @@ class GraphWalkAgent(nn.Module):
         answer_mask = torch.cat(answer_masks).view(len(e_space), -1)
         return answer_mask
 
-    def get_false_negative_mask(self, e_space, e_s, q, e_t, kg):
+    def get_false_negative_mask(self, e_space, e_s, q, e_t, kg: KnowledgeGraph):
         answer_mask = self.get_answer_mask(e_space, e_s, q, kg)
         # This is a trick applied during training where we convert a multi-answer predction problem into several
         # single-answer prediction problems. By masking out the other answers in the training set, we are forcing
@@ -397,7 +415,7 @@ class GraphWalkAgent(nn.Module):
         assert action_mask_min == 0 or action_mask_min == 1
         assert action_mask_max == 0 or action_mask_max == 1
 
-    def get_action_embedding(self, action, kg):
+    def get_action_embedding(self, action, kg: KnowledgeGraph):
         """
         Return (batch) action embedding which is the concatenation of the embeddings of
         the traversed edge and the target node.

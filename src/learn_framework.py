@@ -20,12 +20,14 @@ import torch.optim as optim
 from torch.nn.utils import clip_grad_norm_
 
 import src.eval
+from src.knowledge_graph import KnowledgeGraph
+from src.rl.graph_search.graph_walk_agent import GraphWalkAgent
 from src.utils.ops import var_cuda, zeros_var_cuda
 import src.utils.ops as ops
 
 
 class LFramework(nn.Module):
-    def __init__(self, args, kg, agent):
+    def __init__(self, args, kg:KnowledgeGraph, agent:GraphWalkAgent):
         super(LFramework, self).__init__()
         self.args = args
         self.data_dir = args.data_dir

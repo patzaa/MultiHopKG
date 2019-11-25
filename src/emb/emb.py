@@ -68,6 +68,7 @@ class EmbeddingBasedMethod(LFramework):
         return pred_scores
 
     def get_subject_mask(self, e1_space, e2, q):
+        assert False #TODO(tilo) !?
         kg = self.kg
         if kg.args.mask_test_false_negatives:
             answer_vectors = kg.all_subject_vectors

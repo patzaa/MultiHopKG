@@ -111,10 +111,16 @@ def load_page_rank_scores(input_path, entity2id):
     return pgrk_scores
 
 
+def answers_to_var(d_l):
+    d_v = collections.defaultdict(collections.defaultdict)
+    for x in d_l:
+        for y in d_l[x]:
+            v = torch.LongTensor(list(d_l[x][y])).unsqueeze(1)
+            d_v[x][y] = int_var_cuda(v)
+    return d_v
+
+
 class KnowledgeGraph(nn.Module):
-    """
-    The discrete knowledge graph is stored with an adjacency list.
-    """
 
     def __init__(self, args):
         super(KnowledgeGraph, self).__init__()
@@ -130,16 +136,16 @@ class KnowledgeGraph(nn.Module):
         self.action_space_buckets = None
         self.unique_r_space = None
 
-        self.train_subjects = None
-        self.train_objects = None
-        self.dev_subjects = None
+        # self.train_subjects = None
+        # self.train_objects = None
+        # self.dev_subjects = None
         self.dev_objects = None
-        self.all_subjects = None
+        # self.all_subjects = None
         self.all_objects = None
         self.train_subject_vectors = None
         self.train_object_vectors = None
-        self.dev_subject_vectors = None
-        self.dev_object_vectors = None
+        # self.dev_subject_vectors = None
+        # self.dev_object_vectors = None
         self.all_subject_vectors = None
         self.all_object_vectors = None
 
@@ -306,27 +312,18 @@ class KnowledgeGraph(nn.Module):
                     if add_reversed_edges:
                         add_subject(e2, e1, self.get_inv_relation_id(r), all_subjects)
                         add_object(e2, e1, self.get_inv_relation_id(r), all_objects)
-        self.train_subjects = train_subjects
-        self.train_objects = train_objects
-        self.dev_subjects = dev_subjects
+        # self.train_subjects = train_subjects
+        # self.train_objects = train_objects
+        # self.dev_subjects = dev_subjects
         self.dev_objects = dev_objects
-        self.all_subjects = all_subjects
+        # self.all_subjects = all_subjects
         self.all_objects = all_objects
 
-        # change the answer set into a variable
-        def answers_to_var(d_l):
-            d_v = collections.defaultdict(collections.defaultdict)
-            for x in d_l:
-                for y in d_l[x]:
-                    v = torch.LongTensor(list(d_l[x][y])).unsqueeze(1)
-                    d_v[x][y] = int_var_cuda(v)
-            return d_v
-
-        self.train_subject_vectors = answers_to_var(train_subjects)
+        # self.train_subject_vectors = answers_to_var(train_subjects)
         self.train_object_vectors = answers_to_var(train_objects)
-        self.dev_subject_vectors = answers_to_var(dev_subjects)
-        self.dev_object_vectors = answers_to_var(dev_objects)
-        self.all_subject_vectors = answers_to_var(all_subjects)
+        # self.dev_subject_vectors = answers_to_var(dev_subjects) # TODO(tilo): why unused?
+        # self.dev_object_vectors = answers_to_var(dev_objects)
+        # self.all_subject_vectors = answers_to_var(all_subjects)
         self.all_object_vectors = answers_to_var(all_objects)
 
     def load_fuzzy_facts(self):
