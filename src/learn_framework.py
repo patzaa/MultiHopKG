@@ -208,9 +208,10 @@ class LFramework(nn.Module):
         scores = torch.cat(pred_scores)
         return scores
 
-    def format_batch(self, batch_data, num_labels=-1, num_tiles=1):
+    def convert_tuples_to_tensors(self, batch_data, num_labels=-1, num_tiles=1):
         """
         Convert batched tuples to the tensors accepted by the NN.
+        num_tiles == num_rollouts == beam-size
         """
         def convert_to_binary_multi_subject(e1):
             e1_label = zeros_var_cuda([len(e1), num_labels])
@@ -240,7 +241,7 @@ class LFramework(nn.Module):
             batch_e2 = var_cuda(torch.LongTensor(batch_e2), requires_grad=False)
         # Rollout multiple times for each example
         if num_tiles > 1:
-            batch_e1 = ops.tile_along_beam(batch_e1, num_tiles)
+            batch_e1 = ops.tile_along_beam(batch_e1, num_tiles) # is repeating the vector "num-tiles" times
             batch_r = ops.tile_along_beam(batch_r, num_tiles)
             batch_e2 = ops.tile_along_beam(batch_e2, num_tiles)
         return batch_e1, batch_e2, batch_r

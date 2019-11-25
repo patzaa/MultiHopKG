@@ -32,7 +32,7 @@ class KnowledgeGraph(nn.Module):
         self.relation2id, self.id2relation = {}, {}
         self.type2id, self.id2type = {}, {}
         self.entity2typeid = {}
-        self.adj_list = None
+        self.e1_to_r_to_e2 = None
         self.bandwidth = args.bandwidth
         self.args = args
 
@@ -88,7 +88,7 @@ class KnowledgeGraph(nn.Module):
             # Base graph structure used for training and test
             adj_list_path = os.path.join(data_dir, 'adj_list.pkl')
             with open(adj_list_path, 'rb') as f:
-                self.adj_list = pickle.load(f)
+                self.e1_to_r_to_e2 = pickle.load(f)
             self.vectorize_action_space(data_dir)
 
     def vectorize_action_space(self, data_dir):
@@ -108,10 +108,10 @@ class KnowledgeGraph(nn.Module):
         # Sanity check
         num_facts = 0
         out_degrees = collections.defaultdict(int)
-        for e1 in self.adj_list:
-            for r in self.adj_list[e1]:
-                num_facts += len(self.adj_list[e1][r])
-                out_degrees[e1] += len(self.adj_list[e1][r])
+        for e1 in self.e1_to_r_to_e2:
+            for r in self.e1_to_r_to_e2[e1]:
+                num_facts += len(self.e1_to_r_to_e2[e1][r])
+                out_degrees[e1] += len(self.e1_to_r_to_e2[e1][r])
         print("Sanity check: maximum out degree: {}".format(max(out_degrees.values())))
         print('Sanity check: {} facts in knowledge graph'.format(num_facts))
 
@@ -120,10 +120,10 @@ class KnowledgeGraph(nn.Module):
         
         def get_action_space(e1):
             action_space = []
-            if e1 in self.adj_list: # spos
+            if e1 in self.e1_to_r_to_e2: # spos
                 action_space = [(r,e2)
-                                for r in self.adj_list[e1]
-                                for e2 in self.adj_list[e1][r]]
+                                for r in self.e1_to_r_to_e2[e1]
+                                for e2 in self.e1_to_r_to_e2[e1][r]]
                 if len(action_space) + 1 >= self.bandwidth:
                     # Base graph pruning
                     sorted_action_space = \
@@ -133,8 +133,8 @@ class KnowledgeGraph(nn.Module):
             return action_space
 
         def get_unique_r_space(e1):
-            if e1 in self.adj_list:
-                return list(self.adj_list[e1].keys())
+            if e1 in self.e1_to_r_to_e2:
+                return list(self.e1_to_r_to_e2[e1].keys())
             else:
                 return []
 
@@ -198,7 +198,7 @@ class KnowledgeGraph(nn.Module):
             if self.args.model.startswith('rule'):
                 unique_r_space_list = []
                 max_num_unique_rs = 0
-                for e1 in sorted(self.adj_list.keys()):
+                for e1 in sorted(self.e1_to_r_to_e2.keys()):
                     unique_r_space = get_unique_r_space(e1)
                     unique_r_space_list.append(unique_r_space)
                     if len(unique_r_space) > max_num_unique_rs:
@@ -303,10 +303,10 @@ class KnowledgeGraph(nn.Module):
                 e1_id = self.entity2id[e1]
                 e2_id = self.entity2id[e2]
                 r_id = self.relation2id[r]
-                if not r_id in self.adj_list[e1_id]:
-                    self.adj_list[e1_id][r_id] = set()
-                if not e2_id in self.adj_list[e1_id][r_id]:
-                    self.adj_list[e1_id][r_id].add(e2_id)
+                if not r_id in self.e1_to_r_to_e2[e1_id]:
+                    self.e1_to_r_to_e2[e1_id][r_id] = set()
+                if not e2_id in self.e1_to_r_to_e2[e1_id][r_id]:
+                    self.e1_to_r_to_e2[e1_id][r_id].add(e2_id)
                     count += 1
                     if count > 0 and count % 1000 == 0:
                         print('{} fuzzy facts added'.format(count))
