@@ -8,18 +8,27 @@
 """
 
 import matplotlib
-matplotlib.use('Agg')
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
 
 def visualize_step(action_dist, e, action_space, plot):
     action_space_size = len(action_space)
-    plt_obj = plot.imshow(np.expand_dims(action_dist, 1), interpolation='nearest', cmap=plt.cm.Blues)
-    plt.setp(plot, xticks=[0], xticklabels=[e], yticks=range(action_space_size), yticklabels=action_space)
+    plt_obj = plot.imshow(
+        np.expand_dims(action_dist, 1), interpolation="nearest", cmap=plt.cm.Blues
+    )
+    plt.setp(
+        plot,
+        xticks=[0],
+        xticklabels=[e],
+        yticks=range(action_space_size),
+        yticklabels=action_space,
+    )
     plot.xaxis.tick_top()
     plot.yaxis.tick_right()
-    plot.tick_params(axis='both', which='major', labelsize=6)
+    plot.tick_params(axis="both", which="major", labelsize=6)
     return plt_obj
 
 
@@ -37,7 +46,9 @@ def visualize_path(query, path_components, output_path=None):
     """
     plt.clf()
     num_steps = len(path_components)
-    gridspec_kwargs = dict(top=0.9, bottom=0.1, left=0.1, right=0.9, wspace=8, hspace=0.4)
+    gridspec_kwargs = dict(
+        top=0.9, bottom=0.1, left=0.1, right=0.9, wspace=8, hspace=0.4
+    )
     f, axarr = plt.subplots(num_steps, 1, gridspec_kw=gridspec_kwargs)
     for i, (e, action_space, action_dist) in enumerate(path_components):
         visualize_step(action_dist, e, action_space, axarr[i])
@@ -47,7 +58,7 @@ def visualize_path(query, path_components, output_path=None):
     plt.show()
 
     if output_path:
-        plt.savefig(output_path, bbox_inches='tight', format='png')
-        print('path visualization saved to {}'.format(output_path))
+        plt.savefig(output_path, bbox_inches="tight", format="png")
+        print("path visualization saved to {}".format(output_path))
 
     plt.close(f)

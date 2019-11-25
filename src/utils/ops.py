@@ -17,8 +17,10 @@ EPSILON = float(np.finfo(float).eps)
 HUGE_INT = 1e31
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+
 def to_cuda(x):
-    return x.cuda() if 'cuda' in str(device) else x
+    return x.cuda() if "cuda" in str(device) else x
+
 
 def batch_lookup(M, idx, vector_output=True):
     """
@@ -30,7 +32,7 @@ def batch_lookup(M, idx, vector_output=True):
     """
     batch_size, w = M.size()
     batch_size2, sample_size = idx.size()
-    assert(batch_size == batch_size2)
+    assert batch_size == batch_size2
 
     if sample_size == 1 and vector_output:
         samples = torch.gather(M, 1, idx).view(-1)
@@ -61,20 +63,18 @@ def weighted_softmax(v, w, dim=-1):
 
 def format_triple(triple, kg):
     e1, e2, r = triple
-    rel = kg.id2relation[r] if r != kg.self_edge else '<null>'
-    if not rel.endswith('_inv'):
-        return '{} -{}-> {}'.format(
-            kg.id2entity[e1], rel, kg.id2entity[e2])
+    rel = kg.id2relation[r] if r != kg.self_edge else "<null>"
+    if not rel.endswith("_inv"):
+        return "{} -{}-> {}".format(kg.id2entity[e1], rel, kg.id2entity[e2])
     else:
-        return '{} <-{}- {}'.format(
-            kg.id2entity[e1], rel, kg.id2entity[e2])
+        return "{} <-{}- {}".format(kg.id2entity[e1], rel, kg.id2entity[e2])
 
 
 def format_path(path_trace, kg):
     def get_most_recent_relation(j):
         relation_id = int(path_trace[j][0])
         if relation_id == kg.self_edge:
-            return '<null>'
+            return "<null>"
         else:
             return kg.id2relation[relation_id]
 
@@ -84,23 +84,23 @@ def format_path(path_trace, kg):
     path_str = get_most_recent_entity(0)
     for j in range(1, len(path_trace)):
         rel = get_most_recent_relation(j)
-        if not rel.endswith('_inv'):
-            path_str += ' -{}-> '.format(rel)
+        if not rel.endswith("_inv"):
+            path_str += " -{}-> ".format(rel)
         else:
-            path_str += ' <-{}- '.format(rel[:-4])
+            path_str += " <-{}- ".format(rel[:-4])
         path_str += get_most_recent_entity(j)
     return path_str
 
 
 def format_rule(rule, kg):
-    rule_str = ''
+    rule_str = ""
     for j in range(len(rule)):
         relation_id = int(rule[j])
         rel = kg.id2relation[relation_id]
-        if not rel.endswith('_inv'):
-            rule_str += '-{}-> '.format(rel)
+        if not rel.endswith("_inv"):
+            rule_str += "-{}-> ".format(rel)
         else:
-            rule_str += '<-{}-'.format(rel)
+            rule_str += "<-{}-".format(rel)
     return rule_str
 
 
@@ -145,6 +145,7 @@ def rearrange_vector_list(l, offset):
     for i, v in enumerate(l):
         l[i] = v[offset]
 
+
 def safe_log(x):
     return torch.log(x + EPSILON)
 
@@ -158,7 +159,7 @@ def tile_along_beam(v, beam_size, dim=0):
     if dim == -1:
         dim = len(v.size()) - 1
     v = v.unsqueeze(dim + 1)
-    v = torch.cat([v] * beam_size, dim=dim+1)
+    v = torch.cat([v] * beam_size, dim=dim + 1)
     new_size = []
     for i, d in enumerate(v.size()):
         if i == dim + 1:
@@ -195,7 +196,7 @@ def unique_max(unique_x, x, values, marker_2D=None):
     unique_values, unique_indices = [], []
     # prevent memory explotion during decoding
     for i in range(0, len(unique_x), unique_interval):
-        unique_x_b = unique_x[i:i+unique_interval]
+        unique_x_b = unique_x[i : i + unique_interval]
         marker_2D = (unique_x_b.unsqueeze(1) == x.unsqueeze(0)).float()
         values_2D = marker_2D * values.unsqueeze(0) - (1 - marker_2D) * HUGE_INT
         unique_values_b, unique_idx_b = values_2D.max(dim=1)
@@ -206,14 +207,14 @@ def unique_max(unique_x, x, values, marker_2D=None):
     return unique_values, unique_idx
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     a = torch.randn(2)
     print(a)
     print(tile_along_beam(a, 4))
-    print('--------------------------')
+    print("--------------------------")
     b = torch.randn(2, 3)
     print(b)
     c = tile_along_beam(b, 4)
     print(c)
-    print('--------------------------')
+    print("--------------------------")
     print(c.view(2, -1))

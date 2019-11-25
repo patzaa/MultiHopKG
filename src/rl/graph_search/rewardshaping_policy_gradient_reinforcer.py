@@ -11,8 +11,12 @@ from tqdm import tqdm
 
 import torch
 
-from src.emb.fact_network import get_conve_nn_state_dict, get_conve_kg_state_dict, \
-    get_complex_kg_state_dict, get_distmult_kg_state_dict
+from src.emb.fact_network import (
+    get_conve_nn_state_dict,
+    get_conve_kg_state_dict,
+    get_complex_kg_state_dict,
+    get_distmult_kg_state_dict,
+)
 from src.rl.graph_search.policy_gradient_reinforcement import PolicyGradient
 import src.utils.ops as ops
 from src.utils.ops import zeros_var_cuda
@@ -30,24 +34,24 @@ class RewardShapingPolicyGradient(PolicyGradient):
         self.mu = args.mu
 
         fn_model = self.fn_model
-        if fn_model in ['conve']:
+        if fn_model in ["conve"]:
             fn_state_dict = torch.load(args.conve_state_dict_path)
             fn_nn_state_dict = get_conve_nn_state_dict(fn_state_dict)
             fn_kg_state_dict = get_conve_kg_state_dict(fn_state_dict)
             self.fn.load_state_dict(fn_nn_state_dict)
-        elif fn_model == 'distmult':
+        elif fn_model == "distmult":
             fn_state_dict = torch.load(args.distmult_state_dict_path)
             fn_kg_state_dict = get_distmult_kg_state_dict(fn_state_dict)
-        elif fn_model == 'complex':
+        elif fn_model == "complex":
             fn_state_dict = torch.load(args.complex_state_dict_path)
             fn_kg_state_dict = get_complex_kg_state_dict(fn_state_dict)
-        elif fn_model == 'hypere':
+        elif fn_model == "hypere":
             fn_state_dict = torch.load(args.conve_state_dict_path)
             fn_kg_state_dict = get_conve_kg_state_dict(fn_state_dict)
         else:
             raise NotImplementedError
         self.fn_kg.load_state_dict(fn_kg_state_dict)
-        if fn_model == 'hypere':
+        if fn_model == "hypere":
             complex_state_dict = torch.load(args.complex_state_dict_path)
             complex_kg_state_dict = get_complex_kg_state_dict(complex_state_dict)
             self.fn_secondary_kg.load_state_dict(complex_kg_state_dict)
@@ -56,22 +60,26 @@ class RewardShapingPolicyGradient(PolicyGradient):
         self.fn_kg.eval()
         ops.detach_module(self.fn)
         ops.detach_module(self.fn_kg)
-        if fn_model == 'hypere':
+        if fn_model == "hypere":
             self.fn_secondary_kg.eval()
             ops.detach_module(self.fn_secondary_kg)
 
     def reward_fun(self, e1, r, e2, pred_e2):
-        if self.model.endswith('.rso'):
+        if self.model.endswith(".rso"):
             oracle_reward = forward_fact_oracle(e1, r, pred_e2, self.kg)
             return oracle_reward
         else:
             if self.fn_secondary_kg:
-                real_reward = self.fn.forward_fact(e1, r, pred_e2, self.fn_kg, [self.fn_secondary_kg]).squeeze(1)
+                real_reward = self.fn.forward_fact(
+                    e1, r, pred_e2, self.fn_kg, [self.fn_secondary_kg]
+                ).squeeze(1)
             else:
-                real_reward = self.fn.forward_fact(e1, r, pred_e2, self.fn_kg).squeeze(1)
+                real_reward = self.fn.forward_fact(e1, r, pred_e2, self.fn_kg).squeeze(
+                    1
+                )
             real_reward_mask = (real_reward > self.reward_shaping_threshold).float()
             real_reward *= real_reward_mask
-            if self.model.endswith('rsc'):
+            if self.model.endswith("rsc"):
                 return real_reward
             else:
                 binary_reward = (pred_e2 == e2).float()
@@ -81,7 +89,7 @@ class RewardShapingPolicyGradient(PolicyGradient):
         fn_kg, fn = self.fn_kg, self.fn
         pred_scores = []
         for example_id in tqdm(range(0, len(examples), self.batch_size)):
-            mini_batch = examples[example_id:example_id + self.batch_size]
+            mini_batch = examples[example_id : example_id + self.batch_size]
             mini_batch_size = len(mini_batch)
             if len(mini_batch) < self.batch_size:
                 self.make_full_batch(mini_batch, self.batch_size)
@@ -95,7 +103,8 @@ class RewardShapingPolicyGradient(PolicyGradient):
 
     @property
     def fn_model(self):
-        return self.model.split('.')[2]
+        return self.model.split(".")[2]
+
 
 def forward_fact_oracle(e1, r, e2, kg):
     oracle = zeros_var_cuda([len(e1), kg.num_entities]).cuda()
@@ -105,6 +114,6 @@ def forward_fact_oracle(e1, r, e2, kg):
             answer_vector = kg.all_object_vectors[_e1][_r]
             oracle[i][answer_vector] = 1
         else:
-            raise ValueError('Query answer not found')
+            raise ValueError("Query answer not found")
     oracle_e2 = ops.batch_lookup(oracle, e2.unsqueeze(1))
     return oracle_e2

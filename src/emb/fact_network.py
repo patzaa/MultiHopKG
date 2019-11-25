@@ -18,34 +18,39 @@ import torch.nn.functional as F
 class TripleE(nn.Module):
     def __init__(self, args, num_entities):
         super(TripleE, self).__init__()
-        conve_args = copy.deepcopy(args)    
-        conve_args.model = 'conve'
+        conve_args = copy.deepcopy(args)
+        conve_args.model = "conve"
         self.conve_nn = ConvE(conve_args, num_entities)
         conve_state_dict = torch.load(args.conve_state_dict_path)
         conve_nn_state_dict = get_conve_nn_state_dict(conve_state_dict)
         self.conve_nn.load_state_dict(conve_nn_state_dict)
 
         complex_args = copy.deepcopy(args)
-        complex_args.model = 'complex'
+        complex_args.model = "complex"
         self.complex_nn = ComplEx(complex_args)
 
         distmult_args = copy.deepcopy(args)
-        distmult_args.model = 'distmult'
+        distmult_args.model = "distmult"
         self.distmult_nn = DistMult(distmult_args)
 
     def forward(self, e1, r, conve_kg, secondary_kgs):
         complex_kg = secondary_kgs[0]
         distmult_kg = secondary_kgs[1]
-        return (self.conve_nn.forward(e1, r, conve_kg)
-                + self.complex_nn.forward(e1, r, complex_kg)
-                + self.distmult_nn.forward(e1, r, distmult_kg)) / 3
+        return (
+            self.conve_nn.forward(e1, r, conve_kg)
+            + self.complex_nn.forward(e1, r, complex_kg)
+            + self.distmult_nn.forward(e1, r, distmult_kg)
+        ) / 3
 
     def forward_fact(self, e1, r, conve_kg, secondary_kgs):
         complex_kg = secondary_kgs[0]
         distmult_kg = secondary_kgs[1]
-        return (self.conve_nn.forward_fact(e1, r, conve_kg)
-                + self.complex_nn.forward_fact(e1, r, complex_kg)
-                + self.distmult_nn.forward_fact(e1, r, distmult_kg)) / 3
+        return (
+            self.conve_nn.forward_fact(e1, r, conve_kg)
+            + self.complex_nn.forward_fact(e1, r, complex_kg)
+            + self.distmult_nn.forward_fact(e1, r, distmult_kg)
+        ) / 3
+
 
 class HyperE(nn.Module):
     def __init__(self, args, num_entities):
@@ -56,18 +61,23 @@ class HyperE(nn.Module):
         self.conve_nn.load_state_dict(conve_nn_state_dict)
 
         complex_args = copy.deepcopy(args)
-        complex_args.model = 'complex'
+        complex_args.model = "complex"
         self.complex_nn = ComplEx(complex_args)
 
     def forward(self, e1, r, conve_kg, secondary_kgs):
         complex_kg = secondary_kgs[0]
-        return (self.conve_nn.forward(e1, r, conve_kg)
-                + self.complex_nn.forward(e1, r, complex_kg)) / 2
+        return (
+            self.conve_nn.forward(e1, r, conve_kg)
+            + self.complex_nn.forward(e1, r, complex_kg)
+        ) / 2
 
     def forward_fact(self, e1, r, e2, conve_kg, secondary_kgs):
         complex_kg = secondary_kgs[0]
-        return (self.conve_nn.forward_fact(e1, r, e2, conve_kg)
-                + self.complex_nn.forward_fact(e1, r, e2, complex_kg)) / 2
+        return (
+            self.conve_nn.forward_fact(e1, r, e2, conve_kg)
+            + self.complex_nn.forward_fact(e1, r, e2, complex_kg)
+        ) / 2
+
 
 class ComplEx(nn.Module):
     def __init__(self, args):
@@ -111,13 +121,14 @@ class ComplEx(nn.Module):
         S = F.sigmoid(S)
         return S
 
+
 class ConvE(nn.Module):
     def __init__(self, args, num_entities):
         super(ConvE, self).__init__()
         self.entity_dim = args.entity_dim
         self.relation_dim = args.relation_dim
-        assert(args.emb_2D_d1 * args.emb_2D_d2 == args.entity_dim)
-        assert(args.emb_2D_d1 * args.emb_2D_d2 == args.relation_dim)
+        assert args.emb_2D_d1 * args.emb_2D_d2 == args.entity_dim
+        assert args.emb_2D_d1 * args.emb_2D_d2 == args.relation_dim
         self.emb_2D_d1 = args.emb_2D_d1
         self.emb_2D_d2 = args.emb_2D_d2
         self.num_out_channels = args.num_out_channels
@@ -130,7 +141,7 @@ class ConvE(nn.Module):
         self.bn0 = nn.BatchNorm2d(1)
         self.bn1 = nn.BatchNorm2d(self.num_out_channels)
         self.bn2 = nn.BatchNorm1d(self.entity_dim)
-        self.register_parameter('b', nn.Parameter(torch.zeros(num_entities)))
+        self.register_parameter("b", nn.Parameter(torch.zeros(num_entities)))
         h_out = 2 * self.emb_2D_d1 - self.w_d + 1
         w_out = self.emb_2D_d2 - self.w_d + 1
         self.feat_dim = self.num_out_channels * h_out * w_out
@@ -193,6 +204,7 @@ class ConvE(nn.Module):
         S = F.sigmoid(X)
         return S
 
+
 class DistMult(nn.Module):
     def __init__(self, args):
         super(DistMult, self).__init__()
@@ -213,32 +225,61 @@ class DistMult(nn.Module):
         S = F.sigmoid(S)
         return S
 
+
 def get_conve_nn_state_dict(state_dict):
     conve_nn_state_dict = {}
-    for param_name in ['mdl.b', 'mdl.conv1.weight', 'mdl.conv1.bias', 'mdl.bn0.weight', 'mdl.bn0.bias',
-                       'mdl.bn0.running_mean', 'mdl.bn0.running_var', 'mdl.bn1.weight', 'mdl.bn1.bias',
-                       'mdl.bn1.running_mean', 'mdl.bn1.running_var', 'mdl.bn2.weight', 'mdl.bn2.bias',
-                       'mdl.bn2.running_mean', 'mdl.bn2.running_var', 'mdl.fc.weight', 'mdl.fc.bias']:
-        conve_nn_state_dict[param_name.split('.', 1)[1]] = state_dict['state_dict'][param_name]
+    for param_name in [
+        "mdl.b",
+        "mdl.conv1.weight",
+        "mdl.conv1.bias",
+        "mdl.bn0.weight",
+        "mdl.bn0.bias",
+        "mdl.bn0.running_mean",
+        "mdl.bn0.running_var",
+        "mdl.bn1.weight",
+        "mdl.bn1.bias",
+        "mdl.bn1.running_mean",
+        "mdl.bn1.running_var",
+        "mdl.bn2.weight",
+        "mdl.bn2.bias",
+        "mdl.bn2.running_mean",
+        "mdl.bn2.running_var",
+        "mdl.fc.weight",
+        "mdl.fc.bias",
+    ]:
+        conve_nn_state_dict[param_name.split(".", 1)[1]] = state_dict["state_dict"][
+            param_name
+        ]
     return conve_nn_state_dict
+
 
 def get_conve_kg_state_dict(state_dict):
     kg_state_dict = dict()
-    for param_name in ['kg.entity_embeddings.weight', 'kg.relation_embeddings.weight']:
-        kg_state_dict[param_name.split('.', 1)[1]] = state_dict['state_dict'][param_name]
+    for param_name in ["kg.entity_embeddings.weight", "kg.relation_embeddings.weight"]:
+        kg_state_dict[param_name.split(".", 1)[1]] = state_dict["state_dict"][
+            param_name
+        ]
     return kg_state_dict
+
 
 def get_complex_kg_state_dict(state_dict):
     kg_state_dict = dict()
-    for param_name in ['kg.entity_embeddings.weight', 'kg.relation_embeddings.weight',
-                       'kg.entity_img_embeddings.weight', 'kg.relation_img_embeddings.weight']:
-        kg_state_dict[param_name.split('.', 1)[1]] = state_dict['state_dict'][param_name]
+    for param_name in [
+        "kg.entity_embeddings.weight",
+        "kg.relation_embeddings.weight",
+        "kg.entity_img_embeddings.weight",
+        "kg.relation_img_embeddings.weight",
+    ]:
+        kg_state_dict[param_name.split(".", 1)[1]] = state_dict["state_dict"][
+            param_name
+        ]
     return kg_state_dict
+
 
 def get_distmult_kg_state_dict(state_dict):
     kg_state_dict = dict()
-    for param_name in ['kg.entity_embeddings.weight', 'kg.relation_embeddings.weight']:
-        kg_state_dict[param_name.split('.', 1)[1]] = state_dict['state_dict'][param_name]
+    for param_name in ["kg.entity_embeddings.weight", "kg.relation_embeddings.weight"]:
+        kg_state_dict[param_name.split(".", 1)[1]] = state_dict["state_dict"][
+            param_name
+        ]
     return kg_state_dict
-
-

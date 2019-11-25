@@ -51,16 +51,16 @@ class LFramework(nn.Module):
 
         self.kg = kg
         self.agent = agent
-        print('{} module created'.format(self.model))
+        print("{} module created".format(self.model))
 
     def print_all_model_parameters(self):
-        print('\nModel Parameters')
-        print('--------------------------')
+        print("\nModel Parameters")
+        print("--------------------------")
         for name, param in self.named_parameters():
-            print(name, param.numel(), 'requires_grad={}'.format(param.requires_grad))
+            print(name, param.numel(), "requires_grad={}".format(param.requires_grad))
         param_sizes = [param.numel() for param in self.parameters()]
-        print('Total # parameters = {}'.format(sum(param_sizes)))
-        print('--------------------------')
+        print("Total # parameters = {}".format(sum(param_sizes)))
+        print("--------------------------")
         print()
 
     def run_train(self, train_data, dev_data):
@@ -68,28 +68,34 @@ class LFramework(nn.Module):
 
         if self.optim is None:
             self.optim = optim.Adam(
-                filter(lambda p: p.requires_grad, self.parameters()), lr=self.learning_rate)
+                filter(lambda p: p.requires_grad, self.parameters()),
+                lr=self.learning_rate,
+            )
 
         # Track dev metrics changes
         best_dev_metrics = 0
         dev_metrics_history = []
 
         for epoch_id in range(self.start_epoch, self.num_epochs):
-            print('Epoch {}'.format(epoch_id))
-            if self.rl_variation_tag.startswith('rs'):
+            print("Epoch {}".format(epoch_id))
+            if self.rl_variation_tag.startswith("rs"):
                 # Reward shaping module sanity check:
                 #   Make sure the reward shaping module output value is in the correct range
                 train_scores = self.test_fn(train_data)
                 dev_scores = self.test_fn(dev_data)
-                print('Train set average fact score: {}'.format(float(train_scores.mean())))
-                print('Dev set average fact score: {}'.format(float(dev_scores.mean())))
+                print(
+                    "Train set average fact score: {}".format(
+                        float(train_scores.mean())
+                    )
+                )
+                print("Dev set average fact score: {}".format(float(dev_scores.mean())))
 
             # Update model parameters
             self.train()
-            if self.rl_variation_tag.startswith('rs'):
+            if self.rl_variation_tag.startswith("rs"):
                 self.fn.eval()
                 self.fn_kg.eval()
-                if self.model.endswith('hypere'):
+                if self.model.endswith("hypere"):
                     self.fn_secondary_kg.eval()
             self.batch_size = self.train_batch_size
             random.shuffle(train_data)
@@ -102,95 +108,116 @@ class LFramework(nn.Module):
 
                 self.optim.zero_grad()
 
-                mini_batch = train_data[example_id:example_id + self.batch_size]
+                mini_batch = train_data[example_id : example_id + self.batch_size]
                 if len(mini_batch) < self.batch_size:
                     continue
                 loss = self.loss(mini_batch)
-                loss['model_loss'].backward()
+                loss["model_loss"].backward()
                 if self.grad_norm > 0:
                     clip_grad_norm_(self.parameters(), self.grad_norm)
 
                 self.optim.step()
 
-                batch_losses.append(loss['print_loss'])
-                if 'entropy' in loss:
-                    entropies.append(loss['entropy'])
+                batch_losses.append(loss["print_loss"])
+                if "entropy" in loss:
+                    entropies.append(loss["entropy"])
                 if self.run_analysis:
                     if rewards is None:
-                        rewards = loss['reward']
+                        rewards = loss["reward"]
                     else:
-                        rewards = torch.cat([rewards, loss['reward']])
+                        rewards = torch.cat([rewards, loss["reward"]])
                     if fns is None:
-                        fns = loss['fn']
+                        fns = loss["fn"]
                     else:
-                        fns = torch.cat([fns, loss['fn']])
+                        fns = torch.cat([fns, loss["fn"]])
             # Check training statistics
-            stdout_msg = 'Epoch {}: average training loss = {}'.format(epoch_id, np.mean(batch_losses))
+            stdout_msg = "Epoch {}: average training loss = {}".format(
+                epoch_id, np.mean(batch_losses)
+            )
             if entropies:
-                stdout_msg += ' entropy = {}'.format(np.mean(entropies))
+                stdout_msg += " entropy = {}".format(np.mean(entropies))
             print(stdout_msg)
             self.save_checkpoint(checkpoint_id=epoch_id, epoch_id=epoch_id)
             if self.run_analysis:
-                print('* Analysis: # path types seen = {}'.format(self.num_path_types))
+                print("* Analysis: # path types seen = {}".format(self.num_path_types))
                 num_hits = float(rewards.sum())
                 hit_ratio = num_hits / len(rewards)
-                print('* Analysis: # hits = {} ({})'.format(num_hits, hit_ratio))
+                print("* Analysis: # hits = {} ({})".format(num_hits, hit_ratio))
                 num_fns = float(fns.sum())
                 fn_ratio = num_fns / len(fns)
-                print('* Analysis: false negative ratio = {}'.format(fn_ratio))
+                print("* Analysis: false negative ratio = {}".format(fn_ratio))
 
             # Check dev set performance
-            if self.run_analysis or (epoch_id > 0 and epoch_id % self.num_peek_epochs == 0):
+            if self.run_analysis or (
+                epoch_id > 0 and epoch_id % self.num_peek_epochs == 0
+            ):
                 self.eval()
                 self.batch_size = self.dev_batch_size
                 dev_scores = self.forward(dev_data, verbose=False)
-                print('Dev set performance: (correct evaluation)')
-                _, _, _, _, mrr = src.eval.hits_and_ranks(dev_data, dev_scores, self.kg.dev_objects, verbose=True)
+                print("Dev set performance: (correct evaluation)")
+                _, _, _, _, mrr = src.eval.hits_and_ranks(
+                    dev_data, dev_scores, self.kg.dev_objects, verbose=True
+                )
                 metrics = mrr
-                print('Dev set performance: (include test set labels)')
-                src.eval.hits_and_ranks(dev_data, dev_scores, self.kg.all_objects, verbose=True)
+                print("Dev set performance: (include test set labels)")
+                src.eval.hits_and_ranks(
+                    dev_data, dev_scores, self.kg.all_objects, verbose=True
+                )
                 # Action dropout anneaking
-                if self.model.startswith('point'):
+                if self.model.startswith("point"):
                     eta = self.action_dropout_anneal_interval
-                    if len(dev_metrics_history) > eta and metrics < min(dev_metrics_history[-eta:]):
+                    if len(dev_metrics_history) > eta and metrics < min(
+                        dev_metrics_history[-eta:]
+                    ):
                         old_action_dropout_rate = self.action_dropout_rate
-                        self.action_dropout_rate *= self.action_dropout_anneal_factor 
-                        print('Decreasing action dropout rate: {} -> {}'.format(
-                            old_action_dropout_rate, self.action_dropout_rate))
+                        self.action_dropout_rate *= self.action_dropout_anneal_factor
+                        print(
+                            "Decreasing action dropout rate: {} -> {}".format(
+                                old_action_dropout_rate, self.action_dropout_rate
+                            )
+                        )
                 # Save checkpoint
                 if metrics > best_dev_metrics:
-                    self.save_checkpoint(checkpoint_id=epoch_id, epoch_id=epoch_id, is_best=True)
+                    self.save_checkpoint(
+                        checkpoint_id=epoch_id, epoch_id=epoch_id, is_best=True
+                    )
                     best_dev_metrics = metrics
-                    with open(os.path.join(self.model_dir, 'best_dev_iteration.dat'), 'w') as o_f:
-                        o_f.write('{}'.format(epoch_id))
+                    with open(
+                        os.path.join(self.model_dir, "best_dev_iteration.dat"), "w"
+                    ) as o_f:
+                        o_f.write("{}".format(epoch_id))
                 else:
                     # Early stopping
-                    if epoch_id >= self.num_wait_epochs and metrics < np.mean(dev_metrics_history[-self.num_wait_epochs:]):
+                    if epoch_id >= self.num_wait_epochs and metrics < np.mean(
+                        dev_metrics_history[-self.num_wait_epochs :]
+                    ):
                         break
                 dev_metrics_history.append(metrics)
                 if self.run_analysis:
-                    num_path_types_file = os.path.join(self.model_dir, 'num_path_types.dat')
-                    dev_metrics_file = os.path.join(self.model_dir, 'dev_metrics.dat')
-                    hit_ratio_file = os.path.join(self.model_dir, 'hit_ratio.dat')
-                    fn_ratio_file = os.path.join(self.model_dir, 'fn_ratio.dat')
+                    num_path_types_file = os.path.join(
+                        self.model_dir, "num_path_types.dat"
+                    )
+                    dev_metrics_file = os.path.join(self.model_dir, "dev_metrics.dat")
+                    hit_ratio_file = os.path.join(self.model_dir, "hit_ratio.dat")
+                    fn_ratio_file = os.path.join(self.model_dir, "fn_ratio.dat")
                     if epoch_id == 0:
-                        with open(num_path_types_file, 'w') as o_f:
-                            o_f.write('{}\n'.format(self.num_path_types))
-                        with open(dev_metrics_file, 'w') as o_f:
-                            o_f.write('{}\n'.format(metrics))
-                        with open(hit_ratio_file, 'w') as o_f:
-                            o_f.write('{}\n'.format(hit_ratio))
-                        with open(fn_ratio_file, 'w') as o_f:
-                            o_f.write('{}\n'.format(fn_ratio))
+                        with open(num_path_types_file, "w") as o_f:
+                            o_f.write("{}\n".format(self.num_path_types))
+                        with open(dev_metrics_file, "w") as o_f:
+                            o_f.write("{}\n".format(metrics))
+                        with open(hit_ratio_file, "w") as o_f:
+                            o_f.write("{}\n".format(hit_ratio))
+                        with open(fn_ratio_file, "w") as o_f:
+                            o_f.write("{}\n".format(fn_ratio))
                     else:
-                        with open(num_path_types_file, 'a') as o_f:
-                            o_f.write('{}\n'.format(self.num_path_types))
-                        with open(dev_metrics_file, 'a') as o_f:
-                            o_f.write('{}\n'.format(metrics))
-                        with open(hit_ratio_file, 'a') as o_f:
-                            o_f.write('{}\n'.format(hit_ratio))
-                        with open(fn_ratio_file, 'a') as o_f:
-                            o_f.write('{}\n'.format(fn_ratio))
+                        with open(num_path_types_file, "a") as o_f:
+                            o_f.write("{}\n".format(self.num_path_types))
+                        with open(dev_metrics_file, "a") as o_f:
+                            o_f.write("{}\n".format(metrics))
+                        with open(hit_ratio_file, "a") as o_f:
+                            o_f.write("{}\n".format(hit_ratio))
+                        with open(fn_ratio_file, "a") as o_f:
+                            o_f.write("{}\n".format(fn_ratio))
 
     @abc.abstractmethod
     def loss(self, mini_batch):
@@ -199,7 +226,7 @@ class LFramework(nn.Module):
     def forward(self, examples, verbose=False):
         pred_scores = []
         for example_id in tqdm(range(0, len(examples), self.batch_size)):
-            mini_batch = examples[example_id:example_id + self.batch_size]
+            mini_batch = examples[example_id : example_id + self.batch_size]
             mini_batch_size = len(mini_batch)
             if len(mini_batch) < self.batch_size:
                 self.make_full_batch(mini_batch, self.batch_size)
@@ -213,6 +240,7 @@ class LFramework(nn.Module):
         Convert batched tuples to the tensors accepted by the NN.
         num_tiles == num_rollouts == beam-size
         """
+
         def convert_to_binary_multi_subject(e1):
             e1_label = zeros_var_cuda([len(e1), num_labels])
             for i in range(len(e1)):
@@ -241,7 +269,9 @@ class LFramework(nn.Module):
             batch_e2 = var_cuda(torch.LongTensor(batch_e2), requires_grad=False)
         # Rollout multiple times for each example
         if num_tiles > 1:
-            batch_e1 = ops.tile_along_beam(batch_e1, num_tiles) # is repeating the vector "num-tiles" times
+            batch_e1 = ops.tile_along_beam(
+                batch_e1, num_tiles
+            )  # is repeating the vector "num-tiles" times
             batch_r = ops.tile_along_beam(batch_r, num_tiles)
             batch_e2 = ops.tile_along_beam(batch_e2, num_tiles)
         return batch_e1, batch_e2, batch_r
@@ -264,17 +294,19 @@ class LFramework(nn.Module):
         :param is_best: if set, the model being saved is the best model on dev set.
         """
         checkpoint_dict = dict()
-        checkpoint_dict['state_dict'] = self.state_dict()
-        checkpoint_dict['epoch_id'] = epoch_id
+        checkpoint_dict["state_dict"] = self.state_dict()
+        checkpoint_dict["epoch_id"] = epoch_id
 
-        out_tar = os.path.join(self.model_dir, 'checkpoint-{}.tar'.format(checkpoint_id))
+        out_tar = os.path.join(
+            self.model_dir, "checkpoint-{}.tar".format(checkpoint_id)
+        )
         if is_best:
-            best_path = os.path.join(self.model_dir, 'model_best.tar')
+            best_path = os.path.join(self.model_dir, "model_best.tar")
             shutil.copyfile(out_tar, best_path)
-            print('=> best model updated \'{}\''.format(best_path))
+            print("=> best model updated '{}'".format(best_path))
         else:
             torch.save(checkpoint_dict, out_tar)
-            print('=> saving checkpoint to \'{}\''.format(out_tar))
+            print("=> saving checkpoint to '{}'".format(out_tar))
 
     def load_checkpoint(self, input_file):
         """
@@ -284,43 +316,45 @@ class LFramework(nn.Module):
         :param input_file: Checkpoint file path.
         """
         if os.path.isfile(input_file):
-            print('=> loading checkpoint \'{}\''.format(input_file))
-            checkpoint = torch.load(input_file, map_location="cuda:{}".format(self.args.gpu))
-            self.load_state_dict(checkpoint['state_dict'])
+            print("=> loading checkpoint '{}'".format(input_file))
+            checkpoint = torch.load(
+                input_file, map_location="cuda:{}".format(self.args.gpu)
+            )
+            self.load_state_dict(checkpoint["state_dict"])
             if not self.inference:
-                self.start_epoch = checkpoint['epoch_id'] + 1
-                assert (self.start_epoch <= self.num_epochs)
+                self.start_epoch = checkpoint["epoch_id"] + 1
+                assert self.start_epoch <= self.num_epochs
         else:
-            print('=> no checkpoint found at \'{}\''.format(input_file))
+            print("=> no checkpoint found at '{}'".format(input_file))
 
     def export_to_embedding_projector(self):
         """
         Export knowledge base embeddings into .tsv files accepted by the Tensorflow Embedding Projector.
         """
-        vector_path = os.path.join(self.model_dir, 'vector.tsv')
-        meta_data_path = os.path.join(self.model_dir, 'metadata.tsv')
-        v_o_f = open(vector_path, 'w')
-        m_o_f = open(meta_data_path, 'w')
+        vector_path = os.path.join(self.model_dir, "vector.tsv")
+        meta_data_path = os.path.join(self.model_dir, "metadata.tsv")
+        v_o_f = open(vector_path, "w")
+        m_o_f = open(meta_data_path, "w")
         for r in self.kg.relation2id:
-            if r.endswith('_inv'):
+            if r.endswith("_inv"):
                 continue
             r_id = self.kg.relation2id[r]
             R = self.kg.relation_embeddings.weight[r_id]
-            r_print = ''
+            r_print = ""
             for i in range(len(R)):
-                r_print += '{}\t'.format(float(R[i]))
-            v_o_f.write('{}\n'.format(r_print.strip()))
-            m_o_f.write('{}\n'.format(r))
-            print(r, '{}'.format(float(R.norm())))
+                r_print += "{}\t".format(float(R[i]))
+            v_o_f.write("{}\n".format(r_print.strip()))
+            m_o_f.write("{}\n".format(r))
+            print(r, "{}".format(float(R.norm())))
         v_o_f.close()
         m_o_f.close()
-        print('KG embeddings exported to {}'.format(vector_path))
-        print('KG meta data exported to {}'.format(meta_data_path))
+        print("KG embeddings exported to {}".format(vector_path))
+        print("KG meta data exported to {}".format(meta_data_path))
 
     @property
     def rl_variation_tag(self):
-        parts = self.model.split('.')
+        parts = self.model.split(".")
         if len(parts) > 1:
             return parts[1]
         else:
-            return ''
+            return ""
