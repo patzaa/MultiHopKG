@@ -55,7 +55,7 @@ class PolicyGradient(LFramework):
             stabled_r = stabled_r_2D.view(-1)
             return stabled_r
     
-        e1, e2, r = self.format_batch(mini_batch, num_tiles=self.num_rollouts)
+        e1, e2, r = self.convert_tuples_to_tensors(mini_batch, num_tiles=self.num_rollouts)
         output = self.rollout(e1, r, e2, num_steps=self.num_rollout_steps)
 
         # Compute policy gradient loss
@@ -222,7 +222,7 @@ class PolicyGradient(LFramework):
 
     def predict(self, mini_batch, verbose=False):
         kg, pn = self.kg, self.agent
-        e1, e2, r = self.format_batch(mini_batch)
+        e1, e2, r = self.convert_tuples_to_tensors(mini_batch)
         beam_search_output = search.beam_search(
             pn, e1, r, e2, kg, self.num_rollout_steps, self.beam_size)
         pred_e2s = beam_search_output['pred_e2s']

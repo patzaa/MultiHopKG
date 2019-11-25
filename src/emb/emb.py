@@ -37,7 +37,7 @@ class EmbeddingBasedMethod(LFramework):
             mini_batch_size = len(mini_batch)
             if len(mini_batch) < self.batch_size:
                 self.make_full_batch(mini_batch, self.batch_size)
-            e1, e2, r = self.format_batch(mini_batch)
+            e1, e2, r = self.convert_tuples_to_tensors(mini_batch)
             pred_score = mdl.forward_fact(e1, r, e2, kg)
             pred_scores.append(pred_score[:mini_batch_size])
         return torch.cat(pred_scores)
@@ -45,7 +45,7 @@ class EmbeddingBasedMethod(LFramework):
     def loss(self, mini_batch):
         kg, mdl = self.kg, self.agent
         # compute object training loss
-        e1, e2, r = self.format_batch(mini_batch, num_labels=kg.num_entities)
+        e1, e2, r = self.convert_tuples_to_tensors(mini_batch, num_labels=kg.num_entities)
         e2_label = ((1 - self.label_smoothing_epsilon) * e2) + (1.0 / e2.size(1))
         pred_scores = mdl.forward(e1, r, kg)
         loss = self.loss_fun(pred_scores, e2_label)
@@ -56,7 +56,7 @@ class EmbeddingBasedMethod(LFramework):
 
     def predict(self, mini_batch, verbose=False):
         kg, mdl = self.kg, self.agent
-        e1, e2, r = self.format_batch(mini_batch)
+        e1, e2, r = self.convert_tuples_to_tensors(mini_batch)
         if self.model == 'hypere':
             pred_scores = mdl.forward(e1, r, kg, [self.secondary_kg])
         elif self.model == 'triplee':

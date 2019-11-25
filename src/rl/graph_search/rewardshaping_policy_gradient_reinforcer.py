@@ -85,7 +85,7 @@ class RewardShapingPolicyGradient(PolicyGradient):
             mini_batch_size = len(mini_batch)
             if len(mini_batch) < self.batch_size:
                 self.make_full_batch(mini_batch, self.batch_size)
-            e1, e2, r = self.format_batch(mini_batch)
+            e1, e2, r = self.convert_tuples_to_tensors(mini_batch)
             if self.fn_secondary_kg:
                 pred_score = fn.forward_fact(e1, r, e2, fn_kg, [self.fn_secondary_kg])
             else:

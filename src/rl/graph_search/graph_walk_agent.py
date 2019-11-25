@@ -47,7 +47,7 @@ class GraphWalkAgent(nn.Module):
         self.fn = None
         self.fn_kg = None
 
-    def transit(self, current_entity, obs, kg, use_action_space_bucketing=True, merge_aspace_batching_outcome=False):
+    def transit(self, current_entity, obs, kg:KnowledgeGraph, use_action_space_bucketing=True, merge_aspace_batching_outcome=False):
         """
         Compute the next action distribution based on
             (a) the current node (entity) in KG and the query relation
@@ -55,7 +55,7 @@ class GraphWalkAgent(nn.Module):
         :param current_entity: agent location (node) at step t.
         :param obs: agent observation at step t.
             e_s: source node
-            q: query relation
+            query_relation: query relation
             last_step: If set, the agent is carrying out the last step.
             last_r: label of edge traversed in the previous step
             seen_nodes: notes seen on the paths
@@ -75,20 +75,20 @@ class GraphWalkAgent(nn.Module):
                 action_dist: (Batch) distribution over actions.
                 entropy: (Batch) entropy of action distribution.
         """
-        e_s, q, _, last_step, last_r, seen_nodes = obs
+        e_s, query_relation, _, last_step, last_r, seen_nodes = obs
 
         # Representation of the current state (current node and other observations)
-        Q = kg.get_relation_embeddings(q)
-        H = self.path[-1][0][-1, :, :]
+        embedded_q_rel = kg.get_relation_embeddings(query_relation)
+        encoded_history = self.path[-1][0][-1, :, :]
         if self.relation_only:
-            X = torch.cat([H, Q], dim=-1)
+            X = torch.cat([encoded_history, embedded_q_rel], dim=-1)
         elif self.relation_only_in_path:
             E_s = kg.get_entity_embeddings(e_s)
             E = kg.get_entity_embeddings(current_entity)
-            X = torch.cat([E, H, E_s, Q], dim=-1)
+            X = torch.cat([E, encoded_history, E_s, embedded_q_rel], dim=-1)
         else:
             E = kg.get_entity_embeddings(current_entity)
-            X = torch.cat([E, H, Q], dim=-1)
+            X = torch.cat([E, encoded_history, embedded_q_rel], dim=-1)
 
         # MLP
         X = self.W1(X)
