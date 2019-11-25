@@ -89,6 +89,28 @@ def build_buckets(action_spaces_g, num_entities, args, dummy_r, dummy_e):
     return bucket_inbucket_ids, action_space_buckets
 
 
+def sanity_checks(e1_to_r_to_e2):
+    num_facts = 0
+    out_degrees = collections.defaultdict(int)
+    for e1 in e1_to_r_to_e2:
+        for r in e1_to_r_to_e2[e1]:
+            num_facts += len(e1_to_r_to_e2[e1][r])
+            out_degrees[e1] += len(e1_to_r_to_e2[e1][r])
+    print("Sanity check: maximum out degree: {}".format(max(out_degrees.values())))
+    print("Sanity check: {} facts in knowledge graph".format(num_facts))
+
+
+def load_page_rank_scores(input_path, entity2id):
+    pgrk_scores = collections.defaultdict(float)
+    with open(input_path) as f:
+        for line in f:
+            e, score = line.strip().split(":")
+            e_id = entity2id[e.strip()]
+            score = float(score)
+            pgrk_scores[e_id] = score
+    return pgrk_scores
+
+
 class KnowledgeGraph(nn.Module):
     """
     The discrete knowledge graph is stored with an adjacency list.
@@ -161,35 +183,15 @@ class KnowledgeGraph(nn.Module):
             adj_list_path = os.path.join(data_dir, "adj_list.pkl")
             with open(adj_list_path, "rb") as f:
                 self.e1_to_r_to_e2 = pickle.load(f)
-            self.vectorize_action_space(data_dir)
+            self.preprocess_knowledge_graph(data_dir)
 
-    def vectorize_action_space(self, data_dir):
-        """
-        Pre-process and numericalize the knowledge graph structure.
-        """
+    def preprocess_knowledge_graph(self, data_dir):
 
-        def load_page_rank_scores(input_path):
-            pgrk_scores = collections.defaultdict(float)
-            with open(input_path) as f:
-                for line in f:
-                    e, score = line.strip().split(":")
-                    e_id = self.entity2id[e.strip()]
-                    score = float(score)
-                    pgrk_scores[e_id] = score
-            return pgrk_scores
+        sanity_checks(self.e1_to_r_to_e2)
 
-        # Sanity check
-        num_facts = 0
-        out_degrees = collections.defaultdict(int)
-        for e1 in self.e1_to_r_to_e2:
-            for r in self.e1_to_r_to_e2[e1]:
-                num_facts += len(self.e1_to_r_to_e2[e1][r])
-                out_degrees[e1] += len(self.e1_to_r_to_e2[e1][r])
-        print("Sanity check: maximum out degree: {}".format(max(out_degrees.values())))
-        print("Sanity check: {} facts in knowledge graph".format(num_facts))
-
-        # load page rank scores
-        page_rank_scores = load_page_rank_scores(os.path.join(data_dir, "raw.pgrk"))
+        page_rank_scores = load_page_rank_scores(
+            os.path.join(data_dir, "raw.pgrk"), self.entity2id
+        )
 
         action_spaces_g = action_space_generator(
             self.num_entities, self.e1_to_r_to_e2, self.bandwidth, page_rank_scores
@@ -359,7 +361,7 @@ class KnowledgeGraph(nn.Module):
                     if count > 0 and count % 1000 == 0:
                         print("{} fuzzy facts added".format(count))
 
-        self.vectorize_action_space(self.args.data_dir)
+        self.preprocess_knowledge_graph(self.args.data_dir)
 
     def get_inv_relation_id(self, r_id):
         return r_id + 1
