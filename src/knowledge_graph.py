@@ -51,15 +51,15 @@ def build_forks(
     return [Fork(e1, get_action_space(e1)) for e1 in range(num_entities)]
 
 
-def vectorize_space(action_space_list, action_space_size, dummy_r, dummy_e):
-    bucket_size = len(action_space_list)
+def vectorize_space(forks:List[Fork], action_space_size, dummy_r, dummy_e):
+    bucket_size = len(forks)
     r_space = torch.zeros(bucket_size, action_space_size) + dummy_r
     e_space = torch.zeros(bucket_size, action_space_size) + dummy_e
     action_mask = torch.zeros(bucket_size, action_space_size)
-    for i, action_space in enumerate(action_space_list):
-        for j, (r, e) in enumerate(action_space):
-            r_space[i, j] = r
-            e_space[i, j] = e
+    for i,fork in enumerate(forks):
+        for j, direction in enumerate(fork.directions):
+            r_space[i, j] = direction.rel
+            e_space[i, j] = direction.ent
             action_mask[i, j] = 1
     return ActionSpace(
         int_var_cuda(r_space), int_var_cuda(e_space), var_cuda(action_mask)
@@ -69,15 +69,15 @@ def vectorize_space(action_space_list, action_space_size, dummy_r, dummy_e):
 def build_buckets(
     forks: List[Fork], num_entities, args, dummy_r, dummy_e
 ):
-    action_space_buckets_discrete = collections.defaultdict(list)
+    bucketid2forks = collections.defaultdict(list)
     bucket_inbucket_ids = torch.zeros(num_entities, 2).long()
     num_facts_saved_in_action_table = 0
     for fo in forks:
         b_id = int(len(fo.directions) / args.bucket_interval) + 1
         bucket_inbucket_ids[fo.ent, 0] = b_id
-        position_in_bucket = len(action_space_buckets_discrete[b_id])
+        position_in_bucket = len(bucketid2forks[b_id])
         bucket_inbucket_ids[fo.ent, 1] = position_in_bucket
-        action_space_buckets_discrete[b_id].append(fo.directions)
+        bucketid2forks[b_id].append(fo)
         num_facts_saved_in_action_table += len(fo.directions)
     print(
         "Sanity check: {} facts saved in action table".format(
@@ -86,12 +86,12 @@ def build_buckets(
     )
     action_space_buckets = {
         b_id: vectorize_space(
-            action_space_buckets_discrete[b_id],
+            forks,
             b_id * args.bucket_interval,
             dummy_r,
             dummy_e,
         )
-        for b_id in action_space_buckets_discrete
+        for b_id,forks in bucketid2forks.items()
     }
     return bucket_inbucket_ids, action_space_buckets
 
