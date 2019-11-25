@@ -11,6 +11,7 @@ import torch
 
 import src.utils.ops as ops
 from src.knowledge_graph import Observation
+from src.rl.graph_search.graph_walk_agent import ActionBatch
 from src.utils.ops import (
     unique_max,
     var_cuda,
@@ -168,16 +169,16 @@ def beam_search(
         q = ops.tile_along_beam(q.view(batch_size, -1)[:, 0], k)
         e_s = ops.tile_along_beam(e_s.view(batch_size, -1)[:, 0], k)
         e_t = ops.tile_along_beam(e_t.view(batch_size, -1)[:, 0], k)
-        obs = Observation(e_s,q,e_t,t == (num_steps - 1),last_r,seen_nodes)
+        obs = Observation(e_s, q, e_t, t == (num_steps - 1), last_r, seen_nodes)
         # one step forward in search
-        db_outcomes, _, _ = pn.transit(
+        ab: ActionBatch = pn.transit(
             e,
             obs,
             kg,
             use_action_space_bucketing=True,
             merge_aspace_batching_outcome=True,
         )
-        action_space, action_dist = db_outcomes[0]
+        action_space, action_dist = ab.action_spaces[0], ab.action_dists[0]
         # => [batch_size*k, action_space_size]
         log_action_dist = log_action_prob.view(-1, 1) + ops.safe_log(action_dist)
         # [batch_size*k, action_space_size] => [batch_size*new_k]
