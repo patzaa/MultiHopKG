@@ -22,6 +22,73 @@ import src.utils.ops as ops
 from src.utils.ops import int_var_cuda, var_cuda
 
 
+def action_space_generator(num_entities, e1_to_r_to_e2, bandwidth, page_rank_scores):
+    def get_action_space(e1):
+        action_space = []
+        if e1 in e1_to_r_to_e2:  # spos
+            action_space = [
+                (r, e2) for r in e1_to_r_to_e2[e1] for e2 in e1_to_r_to_e2[e1][r]
+            ]
+            if len(action_space) + 1 >= bandwidth:
+                # Base graph pruning
+                sorted_action_space = sorted(
+                    action_space, key=lambda x: page_rank_scores[x[1]], reverse=True
+                )
+                action_space = sorted_action_space[:bandwidth]
+        action_space.insert(0, (NO_OP_RELATION_ID, e1))
+        return action_space
+
+    for e1 in range(num_entities):
+        action_space = get_action_space(e1)
+        yield action_space
+
+
+def vectorize_space(action_space_list, action_space_size, dummy_r, dummy_e):
+    bucket_size = len(action_space_list)
+    r_space = torch.zeros(bucket_size, action_space_size) + dummy_r
+    e_space = torch.zeros(bucket_size, action_space_size) + dummy_e
+    action_mask = torch.zeros(bucket_size, action_space_size)
+    for i, action_space in enumerate(action_space_list):
+        for j, (r, e) in enumerate(action_space):
+            r_space[i, j] = r
+            e_space[i, j] = e
+            action_mask[i, j] = 1
+    return {
+        "relation-space": int_var_cuda(r_space),
+        "entity-space": int_var_cuda(e_space),
+        "action-mask": var_cuda(action_mask),
+    }
+
+
+def build_buckets(action_spaces_g, num_entities, args, dummy_r, dummy_e):
+
+    action_space_buckets_discrete = collections.defaultdict(list)
+    bucket_inbucket_ids = torch.zeros(num_entities, 2).long()
+    num_facts_saved_in_action_table = 0
+    for e1, action_space in enumerate(action_spaces_g):
+        b_id = int(len(action_space) / args.bucket_interval) + 1
+        bucket_inbucket_ids[e1, 0] = b_id
+        position_in_bucket = len(action_space_buckets_discrete[b_id])
+        bucket_inbucket_ids[e1, 1] = position_in_bucket
+        action_space_buckets_discrete[b_id].append(action_space)
+        num_facts_saved_in_action_table += len(action_space)
+    print(
+        "Sanity check: {} facts saved in action table".format(
+            num_facts_saved_in_action_table - num_entities
+        )
+    )
+    action_space_buckets = {
+        b_id: vectorize_space(
+            action_space_buckets_discrete[b_id],
+            b_id * args.bucket_interval,
+            dummy_r,
+            dummy_e,
+        )
+        for b_id in action_space_buckets_discrete
+    }
+    return bucket_inbucket_ids, action_space_buckets
+
+
 class KnowledgeGraph(nn.Module):
     """
     The discrete knowledge graph is stored with an adjacency list.
@@ -124,44 +191,27 @@ class KnowledgeGraph(nn.Module):
         # load page rank scores
         page_rank_scores = load_page_rank_scores(os.path.join(data_dir, "raw.pgrk"))
 
-        def get_action_space(e1):
-            action_space = []
-            if e1 in self.e1_to_r_to_e2:  # spos
-                action_space = [
-                    (r, e2)
-                    for r in self.e1_to_r_to_e2[e1]
-                    for e2 in self.e1_to_r_to_e2[e1][r]
-                ]
-                if len(action_space) + 1 >= self.bandwidth:
-                    # Base graph pruning
-                    sorted_action_space = sorted(
-                        action_space, key=lambda x: page_rank_scores[x[1]], reverse=True
-                    )
-                    action_space = sorted_action_space[: self.bandwidth]
-            action_space.insert(0, (NO_OP_RELATION_ID, e1))
-            return action_space
+        action_spaces_g = action_space_generator(
+            self.num_entities, self.e1_to_r_to_e2, self.bandwidth, page_rank_scores
+        )
+        if self.args.use_action_space_bucketing:
+            self.bucket_inbucket_ids, self.action_space_buckets = build_buckets(
+                action_spaces_g,
+                self.num_entities,
+                self.args,
+                self.dummy_r,
+                self.dummy_e,
+            )
+        else:
+            assert False
+            self.build_action_space(action_spaces_g)
 
+    def build_action_space(self, action_spaces_g):
         def get_unique_r_space(e1):
             if e1 in self.e1_to_r_to_e2:
                 return list(self.e1_to_r_to_e2[e1].keys())
             else:
                 return []
-
-        def vectorize_action_space(action_space_list, action_space_size):
-            bucket_size = len(action_space_list)
-            r_space = torch.zeros(bucket_size, action_space_size) + self.dummy_r
-            e_space = torch.zeros(bucket_size, action_space_size) + self.dummy_e
-            action_mask = torch.zeros(bucket_size, action_space_size)
-            for i, action_space in enumerate(action_space_list):
-                for j, (r, e) in enumerate(action_space):
-                    r_space[i, j] = r
-                    e_space[i, j] = e
-                    action_mask[i, j] = 1
-            return {
-                "relation-space": int_var_cuda(r_space),
-                "entity-space": int_var_cuda(e_space),
-                "action-mask": var_cuda(action_mask),
-            }
 
         def vectorize_unique_r_space(
             unique_r_space_list, unique_r_space_size, volatile
@@ -175,57 +225,23 @@ class KnowledgeGraph(nn.Module):
                     unique_r_space[i, j] = r
             return int_var_cuda(unique_r_space)
 
-        if self.args.use_action_space_bucketing:
-            """
-            Store action spaces in buckets.
-            """
-            self.action_space_buckets = {}
-            action_space_buckets_discrete = collections.defaultdict(list)
-            self.bucket_inbucket_ids = torch.zeros(self.num_entities, 2).long()
-            num_facts_saved_in_action_table = 0
-            for e1 in range(self.num_entities):
-                action_space = get_action_space(e1)
-                b_id = int(len(action_space) / self.args.bucket_interval) + 1
-                self.bucket_inbucket_ids[e1, 0] = b_id
-                position_in_bucket = len(action_space_buckets_discrete[b_id])
-                self.bucket_inbucket_ids[e1, 1] = position_in_bucket
-                action_space_buckets_discrete[b_id].append(action_space)
-                num_facts_saved_in_action_table += len(action_space)
-            print(
-                "Sanity check: {} facts saved in action table".format(
-                    num_facts_saved_in_action_table - self.num_entities
-                )
+        action_space_list = list(action_spaces_g)
+        max_num_actions = max([len(a) for a in action_space_list])
+        print("Vectorizing action spaces...")
+        self.action_space = vectorize_space(
+            action_space_list, max_num_actions, self.dummy_r, self.dummy_e
+        )
+        if self.args.model.startswith("rule"):
+            unique_r_space_list = []
+            max_num_unique_rs = 0
+            for e1 in sorted(self.e1_to_r_to_e2.keys()):
+                unique_r_space = get_unique_r_space(e1)
+                unique_r_space_list.append(unique_r_space)
+                if len(unique_r_space) > max_num_unique_rs:
+                    max_num_unique_rs = len(unique_r_space)
+            self.unique_r_space = vectorize_unique_r_space(
+                unique_r_space_list, max_num_unique_rs
             )
-            for b_id in action_space_buckets_discrete:
-                print("Vectorizing action spaces bucket {}...".format(b_id))
-                self.action_space_buckets[b_id] = vectorize_action_space(
-                    action_space_buckets_discrete[b_id],
-                    b_id * self.args.bucket_interval,
-                )
-        else:
-            action_space_list = []
-            max_num_actions = 0
-            for e1 in range(self.num_entities):
-                action_space = get_action_space(e1)
-                action_space_list.append(action_space)
-                if len(action_space) > max_num_actions:
-                    max_num_actions = len(action_space)
-            print("Vectorizing action spaces...")
-            self.action_space = vectorize_action_space(
-                action_space_list, max_num_actions
-            )
-
-            if self.args.model.startswith("rule"):
-                unique_r_space_list = []
-                max_num_unique_rs = 0
-                for e1 in sorted(self.e1_to_r_to_e2.keys()):
-                    unique_r_space = get_unique_r_space(e1)
-                    unique_r_space_list.append(unique_r_space)
-                    if len(unique_r_space) > max_num_unique_rs:
-                        max_num_unique_rs = len(unique_r_space)
-                self.unique_r_space = vectorize_unique_r_space(
-                    unique_r_space_list, max_num_unique_rs
-                )
 
     def load_all_answers(self, data_dir, add_reversed_edges=False):
         def add_subject(e1, e2, r, d):
