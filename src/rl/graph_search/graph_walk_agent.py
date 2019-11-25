@@ -290,9 +290,7 @@ class GraphWalkAgent(nn.Module):
         if collapse_entities:
             raise NotImplementedError
         else:
-            entity2bucketid = kg.bucket_inbucket_ids[e.tolist()]
-            bucket_ids = entity2bucketid[:, 0]
-            inbucket_ids = entity2bucketid[:, 1]
+            bucket_ids,inbucket_ids = kg.get_bucket_and_inbucket_ids(e)
             bucketkey2entities = {}
             for i in range(len(e)):
                 b_key = int(bucket_ids[i])
