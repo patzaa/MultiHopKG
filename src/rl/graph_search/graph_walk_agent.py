@@ -6,7 +6,7 @@
  
  Graph Search Policy Network.
 """
-from typing import List, NamedTuple
+from typing import List, NamedTuple, Union
 
 import torch
 import torch.nn as nn
@@ -19,8 +19,21 @@ from src.utils.ops import var_cuda, zeros_var_cuda
 class ActionBatch(NamedTuple):
     action_spaces:List[ActionSpace]
     action_dists:List[torch.Tensor]
-    inv_offset:List[int]
+    inv_offset:Union[List[int],None]
     entropy:torch.Tensor
+
+
+def pad_and_cat_action_space(action_spaces: List[ActionSpace], inv_offset,kg:KnowledgeGraph):
+    db_r_space, db_e_space, db_action_mask = [], [], []
+    for acsp in action_spaces:
+        db_r_space.append(acsp.r_space)
+        db_e_space.append(acsp.e_space)
+        db_action_mask.append(acsp.action_mask)
+    r_space = ops.pad_and_cat(db_r_space, padding_value=kg.dummy_r)[inv_offset]
+    e_space = ops.pad_and_cat(db_e_space, padding_value=kg.dummy_e)[inv_offset]
+    action_mask = ops.pad_and_cat(db_action_mask, padding_value=0)[inv_offset]
+    action_space = ActionSpace(r_space, e_space, action_mask)
+    return action_space
 
 class GraphWalkAgent(nn.Module):
     def __init__(self, args):
@@ -183,27 +196,10 @@ class GraphWalkAgent(nn.Module):
         entropy = torch.cat(entropy_list, dim=0)[inv_offset]
         action = ActionBatch(action_spaces,action_dists,inv_offset,entropy)
 
-        assert not merge_aspace_batching_outcome
-        # def pad_and_cat_action_space(action_spaces:List[ActionSpace], inv_offset):
-        #     db_r_space, db_e_space, db_action_mask = [], [], []
-        #     for acsp in action_spaces:
-        #         db_r_space.append(acsp.r_space)
-        #         db_e_space.append(acsp.e_space)
-        #         db_action_mask.append(acsp.action_mask)
-        #     r_space = ops.pad_and_cat(db_r_space, padding_value=kg.dummy_r)[inv_offset]
-        #     e_space = ops.pad_and_cat(db_e_space, padding_value=kg.dummy_e)[inv_offset]
-        #     action_mask = ops.pad_and_cat(db_action_mask, padding_value=0)[inv_offset]
-        #     action_space = ((r_space, e_space), action_mask)
-        #     return action_space
-
-        # if merge_aspace_batching_outcome:
-        #     db_action_dist = []
-        #     for _, action_dist in db_outcomes:
-        #         db_action_dist.append(action_dist)
-        #     action_space = pad_and_cat_action_space(db_action_spaces, inv_offset)
-        #     action_dist = ops.pad_and_cat(db_action_dist, padding_value=0)[inv_offset]
-        #     db_outcomes = [(action_space, action_dist)]
-        #     inv_offset = None
+        if merge_aspace_batching_outcome:
+            action_space = pad_and_cat_action_space(db_action_spaces, inv_offset,kg)
+            action_dist = ops.pad_and_cat(action.action_dists, padding_value=0)[inv_offset]
+            action = ActionBatch([action_space],[action_dist],None,entropy)
         return action
 
     def initialize_path(self, init_action, kg: KnowledgeGraph):

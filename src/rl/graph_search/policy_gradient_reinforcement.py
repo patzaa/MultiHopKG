@@ -202,23 +202,27 @@ class PolicyGradient(LFramework):
             sample_outcome["action_prob"] = action_prob
             return sample_outcome
 
-        next_r_list = []
-        next_e_list = []
-        action_dist_list = []
-        action_prob_list = []
-        for action_space, action_dist in zip(ab.action_spaces, ab.action_dists):
-            sample_outcome = sample(action_space, action_dist)
-            next_r_list.append(sample_outcome["action_sample"][0])
-            next_e_list.append(sample_outcome["action_sample"][1])
-            action_prob_list.append(sample_outcome["action_prob"])
-            action_dist_list.append(action_dist)
-        next_r = torch.cat(next_r_list, dim=0)[ab.inv_offset]
-        next_e = torch.cat(next_e_list, dim=0)[ab.inv_offset]
-        action_sample = (next_r, next_e)
-        action_prob = torch.cat(action_prob_list, dim=0)[ab.inv_offset]
-        sample_outcome = {}
-        sample_outcome["action_sample"] = action_sample
-        sample_outcome["action_prob"] = action_prob
+        if ab.inv_offset is not None:
+
+            next_r_list = []
+            next_e_list = []
+            action_dist_list = []
+            action_prob_list = []
+            for action_space, action_dist in zip(ab.action_spaces, ab.action_dists):
+                sample_outcome = sample(action_space, action_dist)
+                next_r_list.append(sample_outcome["action_sample"][0])
+                next_e_list.append(sample_outcome["action_sample"][1])
+                action_prob_list.append(sample_outcome["action_prob"])
+                action_dist_list.append(action_dist)
+            next_r = torch.cat(next_r_list, dim=0)[ab.inv_offset]
+            next_e = torch.cat(next_e_list, dim=0)[ab.inv_offset]
+            action_sample = (next_r, next_e)
+            action_prob = torch.cat(action_prob_list, dim=0)[ab.inv_offset]
+            sample_outcome = {}
+            sample_outcome["action_sample"] = action_sample
+            sample_outcome["action_prob"] = action_prob
+        else:
+            sample_outcome = sample(ab.action_spaces[0], ab.action_dists[0])
 
         return sample_outcome
 
