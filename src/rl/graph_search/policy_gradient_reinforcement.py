@@ -13,7 +13,7 @@ from src.knowledge_graph import KnowledgeGraph, ActionSpace, Observation
 from src.learn_framework import LFramework
 import src.rl.graph_search.beam_search as search
 import src.utils.ops as ops
-from src.rl.graph_search.graph_walk_agent import GraphWalkAgent
+from src.rl.graph_search.graph_walk_agent import GraphWalkAgent, ActionBatch
 from src.utils.ops import int_fill_var_cuda, var_cuda, zeros_var_cuda
 
 
@@ -138,15 +138,15 @@ class PolicyGradient(LFramework):
             last_r, e = path_trace[-1]
             obs = Observation(e_s, q, e_t, t == (num_steps - 1), last_r, seen_nodes)
             # e_t is needed to form the ground_truth_edge_mask
-            db_outcomes, inv_offset, policy_entropy = agent.transit(
+            ab: ActionBatch = agent.transit(
                 e, obs, kg, use_action_space_bucketing=self.use_action_space_bucketing
             )
-            sample_outcome = self.sample_action(db_outcomes, inv_offset)
+            sample_outcome = self.sample_action(ab)
             action = sample_outcome["action_sample"]
             agent.update_path(action, kg)
             action_prob = sample_outcome["action_prob"]
             log_action_probs.append(ops.safe_log(action_prob))
-            action_entropy.append(policy_entropy)
+            action_entropy.append(ab.entropy)
             seen_nodes = torch.cat([seen_nodes, e.unsqueeze(1)], dim=1)
             path_trace.append(action)
 
@@ -166,15 +166,9 @@ class PolicyGradient(LFramework):
             "path_components": path_components,
         }
 
-    def sample_action(self, db_outcomes, inv_offset=None):
+    def sample_action(self, ab: ActionBatch):
         """
         Sample an action based on current policy.
-        :param db_outcomes (((r_space, e_space), action_mask), action_dist):
-                r_space: (Variable:batch) relation space
-                e_space: (Variable:batch) target entity space
-                action_mask: (Variable:batch) binary mask indicating padding actions.
-                action_dist: (Variable:batch) action distribution of the current step based on set_policy
-                    network parameters
         :param inv_offset: Indexes for restoring original order in a batch.
         :return next_action (next_r, next_e): Sampled next action.
         :return action_prob: Probability of the sampled action.
@@ -208,26 +202,23 @@ class PolicyGradient(LFramework):
             sample_outcome["action_prob"] = action_prob
             return sample_outcome
 
-        if inv_offset is not None:
-            next_r_list = []
-            next_e_list = []
-            action_dist_list = []
-            action_prob_list = []
-            for action_space, action_dist in db_outcomes:
-                sample_outcome = sample(action_space, action_dist)
-                next_r_list.append(sample_outcome["action_sample"][0])
-                next_e_list.append(sample_outcome["action_sample"][1])
-                action_prob_list.append(sample_outcome["action_prob"])
-                action_dist_list.append(action_dist)
-            next_r = torch.cat(next_r_list, dim=0)[inv_offset]
-            next_e = torch.cat(next_e_list, dim=0)[inv_offset]
-            action_sample = (next_r, next_e)
-            action_prob = torch.cat(action_prob_list, dim=0)[inv_offset]
-            sample_outcome = {}
-            sample_outcome["action_sample"] = action_sample
-            sample_outcome["action_prob"] = action_prob
-        else:
-            sample_outcome = sample(db_outcomes[0][0], db_outcomes[0][1])
+        next_r_list = []
+        next_e_list = []
+        action_dist_list = []
+        action_prob_list = []
+        for action_space, action_dist in zip(ab.action_spaces, ab.action_dists):
+            sample_outcome = sample(action_space, action_dist)
+            next_r_list.append(sample_outcome["action_sample"][0])
+            next_e_list.append(sample_outcome["action_sample"][1])
+            action_prob_list.append(sample_outcome["action_prob"])
+            action_dist_list.append(action_dist)
+        next_r = torch.cat(next_r_list, dim=0)[ab.inv_offset]
+        next_e = torch.cat(next_e_list, dim=0)[ab.inv_offset]
+        action_sample = (next_r, next_e)
+        action_prob = torch.cat(action_prob_list, dim=0)[ab.inv_offset]
+        sample_outcome = {}
+        sample_outcome["action_sample"] = action_sample
+        sample_outcome["action_prob"] = action_prob
 
         return sample_outcome
 
