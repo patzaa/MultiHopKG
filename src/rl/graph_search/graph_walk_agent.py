@@ -6,6 +6,7 @@
  
  Graph Search Policy Network.
 """
+from typing import List
 
 import torch
 import torch.nn as nn
@@ -158,12 +159,12 @@ class GraphWalkAgent(nn.Module):
         obs: Observation,
         policy_nn_fun,
     ):
-        def pad_and_cat_action_space(action_spaces, inv_offset):
+        def pad_and_cat_action_space(action_spaces:List[ActionSpace], inv_offset):
             db_r_space, db_e_space, db_action_mask = [], [], []
-            for (r_space, e_space), action_mask in action_spaces:
-                db_r_space.append(r_space)
-                db_e_space.append(e_space)
-                db_action_mask.append(action_mask)
+            for acsp in action_spaces:
+                db_r_space.append(acsp.r_space)
+                db_e_space.append(acsp.e_space)
+                db_action_mask.append(acsp.action_mask)
             r_space = ops.pad_and_cat(db_r_space, padding_value=kg.dummy_r)[inv_offset]
             e_space = ops.pad_and_cat(db_e_space, padding_value=kg.dummy_e)[inv_offset]
             action_mask = ops.pad_and_cat(db_action_mask, padding_value=0)[inv_offset]
