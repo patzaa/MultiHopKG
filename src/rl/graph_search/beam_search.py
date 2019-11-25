@@ -10,6 +10,7 @@
 import torch
 
 import src.utils.ops as ops
+from src.knowledge_graph import Observation
 from src.utils.ops import (
     unique_max,
     var_cuda,
@@ -167,7 +168,7 @@ def beam_search(
         q = ops.tile_along_beam(q.view(batch_size, -1)[:, 0], k)
         e_s = ops.tile_along_beam(e_s.view(batch_size, -1)[:, 0], k)
         e_t = ops.tile_along_beam(e_t.view(batch_size, -1)[:, 0], k)
-        obs = [e_s, q, e_t, t == (num_steps - 1), last_r, seen_nodes]
+        obs = Observation(e_s,q,e_t,t == (num_steps - 1),last_r,seen_nodes)
         # one step forward in search
         db_outcomes, _, _ = pn.transit(
             e,
