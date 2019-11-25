@@ -27,13 +27,13 @@ class Direction(NamedTuple):
     rel: int
     ent: int
 
-class Fork(NamedTuple):
-    ent:int
-    directions:List[Direction]
 
-def build_forks(
-    num_entities, e1_to_r_to_e2, bandwidth, page_rank_scores
-) -> List[Fork]:
+class Fork(NamedTuple):
+    ent: int
+    directions: List[Direction]
+
+
+def build_forks(num_entities, e1_to_r_to_e2, bandwidth, page_rank_scores) -> List[Fork]:
     def get_action_space(e1):
         directions = [
             Direction(r, e2) for r in e1_to_r_to_e2[e1] for e2 in e1_to_r_to_e2[e1][r]
@@ -51,24 +51,22 @@ def build_forks(
     return [Fork(e1, get_action_space(e1)) for e1 in range(num_entities)]
 
 
-def vectorize_space(forks:List[Fork], action_space_size, dummy_r, dummy_e):
+def vectorize_space(forks: List[Fork], action_space_size, dummy_r, dummy_e):
     bucket_size = len(forks)
     r_space = torch.zeros(bucket_size, action_space_size) + dummy_r
     e_space = torch.zeros(bucket_size, action_space_size) + dummy_e
     action_mask = torch.zeros(bucket_size, action_space_size)
-    for i,fork in enumerate(forks):
+    for i, fork in enumerate(forks):
         for j, direction in enumerate(fork.directions):
             r_space[i, j] = direction.rel
             e_space[i, j] = direction.ent
             action_mask[i, j] = 1
     return ActionSpace(
-        int_var_cuda(r_space), int_var_cuda(e_space), var_cuda(action_mask)
+        forks, int_var_cuda(r_space), int_var_cuda(e_space), var_cuda(action_mask)
     )
 
 
-def build_buckets(
-    forks: List[Fork], num_entities, args, dummy_r, dummy_e
-):
+def build_buckets(forks: List[Fork], num_entities, args, dummy_r, dummy_e):
     bucketid2forks = collections.defaultdict(list)
     bucket_inbucket_ids = torch.zeros(num_entities, 2).long()
     num_facts_saved_in_action_table = 0
@@ -84,16 +82,11 @@ def build_buckets(
             num_facts_saved_in_action_table - num_entities
         )
     )
-    action_space_buckets = {
-        b_id: vectorize_space(
-            forks,
-            b_id * args.bucket_interval,
-            dummy_r,
-            dummy_e,
-        )
-        for b_id,forks in bucketid2forks.items()
+    bid2ActionSpace = {
+        b_id: vectorize_space(forks, b_id * args.bucket_interval, dummy_r, dummy_e)
+        for b_id, forks in bucketid2forks.items()
     }
-    return bucket_inbucket_ids, action_space_buckets
+    return bucket_inbucket_ids, bid2ActionSpace
 
 
 def sanity_checks(e1_to_r_to_e2):
@@ -128,13 +121,14 @@ def answers_to_var(d_l):
 
 
 class ActionSpace(NamedTuple):
+    forks: List[Fork]
     r_space: torch.Tensor
     e_space: torch.Tensor
     action_mask: torch.Tensor
 
     def get_slice(self, idx):
-        d = {k: getattr(self, k)[idx] for k in self._fields}
-        return ActionSpace(**d)
+        d = {k: getattr(self, k)[idx] for k in self._fields if k!='forks'}
+        return ActionSpace(**d,forks=[self.forks[i] for i in idx])
 
 
 class Observation(NamedTuple):
@@ -162,7 +156,7 @@ class KnowledgeGraph(nn.Module):
         self.args = args
 
         self.action_space = None
-        self.action_space_buckets: Dict[int, ActionSpace] = None
+        self.bucketid2ActionSpace: Dict[int, ActionSpace] = None
         self.unique_r_space = None
 
         # self.train_subjects = None
@@ -238,18 +232,14 @@ class KnowledgeGraph(nn.Module):
             self.num_entities,
             {
                 **self.e1_to_r_to_e2,
-                **{self.entity2id[k]:{}  for k in ["DUMMY_ENTITY", "NO_OP_ENTITY"]},
+                **{self.entity2id[k]: {} for k in ["DUMMY_ENTITY", "NO_OP_ENTITY"]},
             },
             self.bandwidth,
             page_rank_scores,
         )
         if self.args.use_action_space_bucketing:
-            self._bucket_inbucket_ids, self.action_space_buckets = build_buckets(
-                forks,
-                self.num_entities,
-                self.args,
-                self.dummy_r,
-                self.dummy_e,
+            self._bucket_inbucket_ids, self.bucketid2ActionSpace = build_buckets(
+                forks, self.num_entities, self.args, self.dummy_r, self.dummy_e
             )
         else:
             assert False

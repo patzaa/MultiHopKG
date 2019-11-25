@@ -27,14 +27,16 @@ def pad_and_cat_action_space(
     action_spaces: List[ActionSpace], inv_offset, kg: KnowledgeGraph
 ):
     db_r_space, db_e_space, db_action_mask = [], [], []
+    forks = []
     for acsp in action_spaces:
+        forks+=acsp.forks
         db_r_space.append(acsp.r_space)
         db_e_space.append(acsp.e_space)
         db_action_mask.append(acsp.action_mask)
     r_space = ops.pad_and_cat(db_r_space, padding_value=kg.dummy_r)[inv_offset]
     e_space = ops.pad_and_cat(db_e_space, padding_value=kg.dummy_e)[inv_offset]
     action_mask = ops.pad_and_cat(db_action_mask, padding_value=0)[inv_offset]
-    action_space = ActionSpace(r_space, e_space, action_mask)
+    action_space = ActionSpace(forks,r_space, e_space, action_mask)
     return action_space
 
 
@@ -303,7 +305,7 @@ class GraphWalkAgent(nn.Module):
             bucketkey2entities = self.build_buckedkey2entities_mapping(bucket_ids)
 
             for b_key, entities_inthisbucket in bucketkey2entities.items():
-                bucket_action_space = kg.action_space_buckets[b_key]
+                bucket_action_space = kg.bucketid2ActionSpace[b_key]
                 inbucket_ids_of_entities_inthisbucket = inbucket_ids[
                     entities_inthisbucket
                 ].tolist()
@@ -332,7 +334,7 @@ class GraphWalkAgent(nn.Module):
                 bucketkey2entities[b_key].append(i)
         return bucketkey2entities
 
-    def apply_action_masks(self, acsp, e, obs, kg: KnowledgeGraph):
+    def apply_action_masks(self, acsp:ActionSpace, e, obs, kg: KnowledgeGraph):
         r_space, e_space, action_mask = acsp.r_space, acsp.e_space, acsp.action_mask
         e_s, q, e_t, last_step, last_r, seen_nodes = obs
 
@@ -358,7 +360,7 @@ class GraphWalkAgent(nn.Module):
         # loop_mask_b = (((seen_nodes_b.unsqueeze(1) == e_space.unsqueeze(2)).sum(2) > 0) *
         #      (r_space != NO_OP_RELATION_ID)).float()
         # action_mask *= (1 - loop_mask_b)
-        return ActionSpace(r_space, e_space, action_mask)
+        return ActionSpace(acsp.forks,r_space, e_space, action_mask)
 
     def get_ground_truth_edge_mask(
         self, e, r_space, e_space, e_s, q, e_t, kg: KnowledgeGraph
