@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import src.utils.ops as ops
-from src.knowledge_graph import KnowledgeGraph
+from src.knowledge_graph import KnowledgeGraph, ActionSpace, Observation
 from src.utils.ops import var_cuda, zeros_var_cuda
 
 
@@ -50,7 +50,7 @@ class GraphWalkAgent(nn.Module):
     def transit(
         self,
         current_entity,
-        obs,
+        obs: Observation,
         kg: KnowledgeGraph,
         use_action_space_bucketing=True,
         merge_aspace_batching_outcome=False,
@@ -82,10 +82,11 @@ class GraphWalkAgent(nn.Module):
                 action_dist: (Batch) distribution over actions.
                 entropy: (Batch) entropy of action distribution.
         """
-        e_s, query_relation, _, _, _, _ = obs
 
         # Representation of the current state (current node and other observations)
-        X = self.encode_history(current_entity, e_s, kg, query_relation)
+        X = self.encode_history(
+            current_entity, obs.source_entity, kg, obs.query_relation
+        )
 
         # MLP
         X = self.W1(X)
@@ -94,12 +95,11 @@ class GraphWalkAgent(nn.Module):
         X = self.W2(X)
         X2 = self.W2Dropout(X)
 
-        def policy_nn_fun(X2, action_space):
-            (r_space, e_space), action_mask = action_space
-            A = self.get_action_embedding((r_space, e_space), kg)
+        def policy_nn_fun(X2, acs: ActionSpace):
+            A = self.get_action_embedding((acs.r_space, acs.e_space), kg)
             action_dist = F.softmax(
                 torch.squeeze(A @ torch.unsqueeze(X2, 2), 2)
-                - (1 - action_mask) * ops.HUGE_INT,
+                - (1 - acs.action_mask) * ops.HUGE_INT,
                 dim=-1,
             )
             # action_dist = ops.weighted_softmax(torch.squeeze(A @ torch.unsqueeze(X2, 2), 2), action_mask)
@@ -150,7 +150,13 @@ class GraphWalkAgent(nn.Module):
         return db_outcomes, entropy, inv_offset
 
     def do_it_with_bucketing(
-        self, X2, current_entity, kg, merge_aspace_batching_outcome, obs, policy_nn_fun
+        self,
+        X2,
+        current_entity,
+        kg,
+        merge_aspace_batching_outcome,
+        obs: Observation,
+        policy_nn_fun,
     ):
         def pad_and_cat_action_space(action_spaces, inv_offset):
             db_r_space, db_e_space, db_action_mask = [], [], []
@@ -178,6 +184,7 @@ class GraphWalkAgent(nn.Module):
             entropy_list.append(entropy_b)
         inv_offset = [i for i, _ in sorted(enumerate(references), key=lambda x: x[1])]
         entropy = torch.cat(entropy_list, dim=0)[inv_offset]
+
         if merge_aspace_batching_outcome:
             db_action_dist = []
             for _, action_dist in db_outcomes:
@@ -235,7 +242,7 @@ class GraphWalkAgent(nn.Module):
         )
 
     def get_action_space_in_buckets(
-        self, e, obs, kg: KnowledgeGraph, collapse_entities=False
+        self, e, obs: Observation, kg: KnowledgeGraph, collapse_entities=False
     ):
         """
         To compute the search operation in batch, we group the action spaces of different states
@@ -271,11 +278,6 @@ class GraphWalkAgent(nn.Module):
             l_batch_refsi stores the indices of the examples in bucket i in the current batch,
             which is used later to restore the output results to the original order.
         """
-        e_s, q, e_t, last_step, last_r, seen_nodes = obs
-        assert len(e) == len(last_r)
-        assert len(e) == len(e_s)
-        assert len(e) == len(q)
-        assert len(e) == len(e_t)
         db_action_spaces, db_references = [], []
 
         if collapse_entities:
@@ -297,22 +299,12 @@ class GraphWalkAgent(nn.Module):
                 ].tolist()
                 e_b = e[entities_inthisbucket]
 
-                obs_b = [
-                    e_s[entities_inthisbucket],
-                    q[entities_inthisbucket],
-                    e_t[entities_inthisbucket],
-                    last_step,
-                    last_r[entities_inthisbucket],
-                    seen_nodes[entities_inthisbucket],
-                ]
+                obs_b = obs.get_slice(entities_inthisbucket)
+
                 action_space_b = self.apply_action_masks(
-                    bucket_action_space["relation-space"][
-                        inbucket_ids_of_entities_inthisbucket
-                    ],
-                    bucket_action_space["entity-space"][
-                        inbucket_ids_of_entities_inthisbucket
-                    ],
-                    bucket_action_space["action-mask"][
+                    bucket_action_space.r_space[inbucket_ids_of_entities_inthisbucket],
+                    bucket_action_space.e_space[inbucket_ids_of_entities_inthisbucket],
+                    bucket_action_space.action_mask[
                         inbucket_ids_of_entities_inthisbucket
                     ],
                     e_b,
@@ -352,7 +344,7 @@ class GraphWalkAgent(nn.Module):
         # loop_mask_b = (((seen_nodes_b.unsqueeze(1) == e_space.unsqueeze(2)).sum(2) > 0) *
         #      (r_space != NO_OP_RELATION_ID)).float()
         # action_mask *= (1 - loop_mask_b)
-        return (r_space, e_space), action_mask
+        return ActionSpace(r_space, e_space, action_mask)
 
     def get_ground_truth_edge_mask(
         self, e, r_space, e_space, e_s, q, e_t, kg: KnowledgeGraph

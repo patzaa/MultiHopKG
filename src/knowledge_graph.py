@@ -10,6 +10,7 @@
 import collections
 import os
 import pickle
+from typing import NamedTuple, Dict
 
 import torch
 import torch.nn as nn
@@ -53,11 +54,9 @@ def vectorize_space(action_space_list, action_space_size, dummy_r, dummy_e):
             r_space[i, j] = r
             e_space[i, j] = e
             action_mask[i, j] = 1
-    return {
-        "relation-space": int_var_cuda(r_space),
-        "entity-space": int_var_cuda(e_space),
-        "action-mask": var_cuda(action_mask),
-    }
+    return ActionSpace(
+        int_var_cuda(r_space), int_var_cuda(e_space), var_cuda(action_mask)
+    )
 
 
 def build_buckets(action_spaces_g, num_entities, args, dummy_r, dummy_e):
@@ -120,8 +119,26 @@ def answers_to_var(d_l):
     return d_v
 
 
-class KnowledgeGraph(nn.Module):
+class ActionSpace(NamedTuple):
+    r_space: torch.Tensor
+    e_space: torch.Tensor
+    action_mask: torch.Tensor
 
+
+class Observation(NamedTuple):
+    source_entity: torch.Tensor
+    query_relation: torch.Tensor
+    target_entity: torch.Tensor
+    is_last: bool
+    last_relation: torch.Tensor
+    seen_nodes: torch.Tensor
+
+    def get_slice(self, idx):
+        d = {k: getattr(self, k)[idx] for k in self._fields if k != "is_last"}
+        return Observation(**d, is_last=self.is_last)
+
+
+class KnowledgeGraph(nn.Module):
     def __init__(self, args):
         super(KnowledgeGraph, self).__init__()
         self.entity2id, self.id2entity = {}, {}
@@ -133,7 +150,7 @@ class KnowledgeGraph(nn.Module):
         self.args = args
 
         self.action_space = None
-        self.action_space_buckets = None
+        self.action_space_buckets: Dict[int, ActionSpace] = None
         self.unique_r_space = None
 
         # self.train_subjects = None

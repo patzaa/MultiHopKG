@@ -9,7 +9,7 @@
 
 import torch
 
-from src.knowledge_graph import KnowledgeGraph
+from src.knowledge_graph import KnowledgeGraph, ActionSpace, Observation
 from src.learn_framework import LFramework
 import src.rl.graph_search.beam_search as search
 import src.utils.ops as ops
@@ -18,7 +18,7 @@ from src.utils.ops import int_fill_var_cuda, var_cuda, zeros_var_cuda
 
 
 class PolicyGradient(LFramework):
-    def __init__(self, args, kg:KnowledgeGraph, agent: GraphWalkAgent):
+    def __init__(self, args, kg: KnowledgeGraph, agent: GraphWalkAgent):
         super(PolicyGradient, self).__init__(args, kg, agent)
 
         # Training hyperparameters
@@ -136,14 +136,8 @@ class PolicyGradient(LFramework):
 
         for t in range(num_steps):
             last_r, e = path_trace[-1]
-            obs = [
-                e_s,
-                q,
-                e_t,
-                t == (num_steps - 1),
-                last_r,
-                seen_nodes,
-            ]  # e_t is needed to form the ground_truth_edge_mask
+            obs = Observation(e_s, q, e_t, t == (num_steps - 1), last_r, seen_nodes)
+            # e_t is needed to form the ground_truth_edge_mask
             db_outcomes, inv_offset, policy_entropy = agent.transit(
                 e, obs, kg, use_action_space_bucketing=self.use_action_space_bucketing
             )
@@ -201,13 +195,14 @@ class PolicyGradient(LFramework):
             else:
                 return action_dist
 
-        def sample(action_space, action_dist):
+        def sample(acsp: ActionSpace, action_dist):
             sample_outcome = {}
-            ((r_space, e_space), action_mask) = action_space
-            sample_action_dist = apply_action_dropout_mask(action_dist, action_mask)
+            sample_action_dist = apply_action_dropout_mask(
+                action_dist, acsp.action_mask
+            )
             idx = torch.multinomial(sample_action_dist, 1, replacement=True)
-            next_r = ops.batch_lookup(r_space, idx)
-            next_e = ops.batch_lookup(e_space, idx)
+            next_r = ops.batch_lookup(acsp.r_space, idx)
+            next_e = ops.batch_lookup(acsp.e_space, idx)
             action_prob = ops.batch_lookup(action_dist, idx)
             sample_outcome["action_sample"] = (next_r, next_e)
             sample_outcome["action_prob"] = action_prob
