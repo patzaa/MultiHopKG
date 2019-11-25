@@ -124,6 +124,10 @@ class ActionSpace(NamedTuple):
     e_space: torch.Tensor
     action_mask: torch.Tensor
 
+    def get_slice(self, idx):
+        d = {k: getattr(self, k)[idx] for k in self._fields}
+        return ActionSpace(**d)
+
 
 class Observation(NamedTuple):
     source_entity: torch.Tensor
@@ -208,6 +212,12 @@ class KnowledgeGraph(nn.Module):
                 self.e1_to_r_to_e2 = pickle.load(f)
             self.preprocess_knowledge_graph(data_dir)
 
+    def get_bucket_and_inbucket_ids(self, entities:torch.Tensor):
+        entity2bucketid = self._bucket_inbucket_ids[entities.tolist()]
+        bucket_ids = entity2bucketid[:, 0]
+        inbucket_ids = entity2bucketid[:, 1]
+        return bucket_ids,inbucket_ids
+
     def preprocess_knowledge_graph(self, data_dir):
 
         sanity_checks(self.e1_to_r_to_e2)
@@ -220,7 +230,7 @@ class KnowledgeGraph(nn.Module):
             self.num_entities, self.e1_to_r_to_e2, self.bandwidth, page_rank_scores
         )
         if self.args.use_action_space_bucketing:
-            self.bucket_inbucket_ids, self.action_space_buckets = build_buckets(
+            self._bucket_inbucket_ids, self.action_space_buckets = build_buckets(
                 action_spaces_g,
                 self.num_entities,
                 self.args,

@@ -17,13 +17,15 @@ from src.knowledge_graph import KnowledgeGraph, ActionSpace, Observation
 from src.utils.ops import var_cuda, zeros_var_cuda
 
 class ActionBatch(NamedTuple):
-    action_spaces:List[ActionSpace]
-    action_dists:List[torch.Tensor]
-    inv_offset:Union[List[int],None]
-    entropy:torch.Tensor
+    action_spaces: List[ActionSpace]
+    action_dists: List[torch.Tensor]
+    inv_offset: Union[List[int], None]
+    entropy: torch.Tensor
 
 
-def pad_and_cat_action_space(action_spaces: List[ActionSpace], inv_offset,kg:KnowledgeGraph):
+def pad_and_cat_action_space(
+    action_spaces: List[ActionSpace], inv_offset, kg: KnowledgeGraph
+):
     db_r_space, db_e_space, db_action_mask = [], [], []
     for acsp in action_spaces:
         db_r_space.append(acsp.r_space)
@@ -34,6 +36,7 @@ def pad_and_cat_action_space(action_spaces: List[ActionSpace], inv_offset,kg:Kno
     action_mask = ops.pad_and_cat(db_action_mask, padding_value=0)[inv_offset]
     action_space = ActionSpace(r_space, e_space, action_mask)
     return action_space
+
 
 class GraphWalkAgent(nn.Module):
     def __init__(self, args):
@@ -73,7 +76,7 @@ class GraphWalkAgent(nn.Module):
         kg: KnowledgeGraph,
         use_action_space_bucketing=True,
         merge_aspace_batching_outcome=False,
-    )->ActionBatch:
+    ) -> ActionBatch:
         """
         Compute the next action distribution based on
             (a) the current node (entity) in KG and the query relation
@@ -155,18 +158,18 @@ class GraphWalkAgent(nn.Module):
             X = torch.cat([E, encoded_history, embedded_q_rel], dim=-1)
         return X
 
-    def do_it_without_bucketing(self, X2, current_entity, kg, obs, policy_nn_fun):
-        def get_action_space(e, obs, kg):
-            r_space = kg.action_space["relation-space"][e]
-            e_space = kg.action_space["entity-space"][e]
-            action_mask = kg.action_space["action-mask"][e]
-            return self.apply_action_masks(r_space, e_space, action_mask, e, obs, kg)
-
-        action_space = get_action_space(current_entity, obs, kg)
-        action_dist, entropy = policy_nn_fun(X2, action_space)
-        db_outcomes = [(action_space, action_dist)]
-        inv_offset = None
-        return db_outcomes, entropy, inv_offset
+    # def do_it_without_bucketing(self, X2, current_entity, kg, obs, policy_nn_fun):
+    #     def get_action_space(e, obs, kg):
+    #         r_space = kg.action_space["relation-space"][e]
+    #         e_space = kg.action_space["entity-space"][e]
+    #         action_mask = kg.action_space["action-mask"][e]
+    #         return self.apply_action_masks(acsp, e, obs, kg)
+    #
+    #     action_space = get_action_space(current_entity, obs, kg)
+    #     action_dist, entropy = policy_nn_fun(X2, action_space)
+    #     db_outcomes = [(action_space, action_dist)]
+    #     inv_offset = None
+    #     return db_outcomes, entropy, inv_offset
 
     def do_it_with_bucketing(
         self,
@@ -194,12 +197,14 @@ class GraphWalkAgent(nn.Module):
             entropy_list.append(entropy_b)
         inv_offset = [i for i, _ in sorted(enumerate(references), key=lambda x: x[1])]
         entropy = torch.cat(entropy_list, dim=0)[inv_offset]
-        action = ActionBatch(action_spaces,action_dists,inv_offset,entropy)
+        action = ActionBatch(action_spaces, action_dists, inv_offset, entropy)
 
         if merge_aspace_batching_outcome:
-            action_space = pad_and_cat_action_space(db_action_spaces, inv_offset,kg)
-            action_dist = ops.pad_and_cat(action.action_dists, padding_value=0)[inv_offset]
-            action = ActionBatch([action_space],[action_dist],None,entropy)
+            action_space = pad_and_cat_action_space(db_action_spaces, inv_offset, kg)
+            action_dist = ops.pad_and_cat(action.action_dists, padding_value=0)[
+                inv_offset
+            ]
+            action = ActionBatch([action_space], [action_dist], None, entropy)
         return action
 
     def initialize_path(self, init_action, kg: KnowledgeGraph):
@@ -249,7 +254,11 @@ class GraphWalkAgent(nn.Module):
         )
 
     def get_action_space_in_buckets(
-        self, e, obs: Observation, kg: KnowledgeGraph, collapse_entities=False
+        self,
+        current_entity: torch.Tensor,
+        obs: Observation,
+        kg: KnowledgeGraph,
+        collapse_entities=False,
     ):
         """
         To compute the search operation in batch, we group the action spaces of different states
@@ -290,41 +299,41 @@ class GraphWalkAgent(nn.Module):
         if collapse_entities:
             raise NotImplementedError
         else:
-            bucket_ids,inbucket_ids = kg.get_bucket_and_inbucket_ids(e)
-            bucketkey2entities = {}
-            for i in range(len(e)):
-                b_key = int(bucket_ids[i])
-                if not b_key in bucketkey2entities:
-                    bucketkey2entities[b_key] = []
-                bucketkey2entities[b_key].append(i)
+            bucket_ids, inbucket_ids = kg.get_bucket_and_inbucket_ids(current_entity)
+            bucketkey2entities = self.build_buckedkey2entities_mapping(bucket_ids)
+
             for b_key, entities_inthisbucket in bucketkey2entities.items():
                 bucket_action_space = kg.action_space_buckets[b_key]
                 inbucket_ids_of_entities_inthisbucket = inbucket_ids[
                     entities_inthisbucket
                 ].tolist()
-                e_b = e[entities_inthisbucket]
+                e_b = current_entity[entities_inthisbucket]
 
                 obs_b = obs.get_slice(entities_inthisbucket)
 
+                bucket_action_space_sliced = bucket_action_space.get_slice(
+                    inbucket_ids_of_entities_inthisbucket
+                )
                 action_space_b = self.apply_action_masks(
-                    bucket_action_space.r_space[inbucket_ids_of_entities_inthisbucket],
-                    bucket_action_space.e_space[inbucket_ids_of_entities_inthisbucket],
-                    bucket_action_space.action_mask[
-                        inbucket_ids_of_entities_inthisbucket
-                    ],
-                    e_b,
-                    obs_b,
-                    kg,
+                    bucket_action_space_sliced, e_b, obs_b, kg
                 )
                 db_action_spaces.append(action_space_b)
                 db_references.append(entities_inthisbucket)
 
         return db_action_spaces, db_references
 
-    def apply_action_masks(
-        self, r_space, e_space, action_mask, e, obs, kg: KnowledgeGraph
-    ):
+    def build_buckedkey2entities_mapping(self, bucket_ids):
+        bucketkey2entities = {}
+        for i, b_key in enumerate(bucket_ids.tolist()):
+            b_key = int(b_key)
+            if b_key not in bucketkey2entities:
+                bucketkey2entities[b_key] = [i]
+            else:
+                bucketkey2entities[b_key].append(i)
+        return bucketkey2entities
 
+    def apply_action_masks(self, acsp, e, obs, kg: KnowledgeGraph):
+        r_space, e_space, action_mask = acsp.r_space, acsp.e_space, acsp.action_mask
         e_s, q, e_t, last_step, last_r, seen_nodes = obs
 
         # Prevent the agent from selecting the ground truth edge
