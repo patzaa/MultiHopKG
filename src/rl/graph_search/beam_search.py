@@ -10,7 +10,7 @@
 import torch
 
 import src.utils.ops as ops
-from src.knowledge_graph import Observation, ActionSpace
+from src.knowledge_graph import Observation, ActionSpace, Action
 from src.rl.graph_search.graph_walk_agent import BucketActions
 from src.utils.ops import (
     unique_max,
@@ -40,7 +40,7 @@ def beam_search(
     assert num_steps >= 1
     batch_size = len(e_s)
 
-    def top_k_action(log_action_dist, action_space:ActionSpace):
+    def top_k_action(log_action_dist, action_space: ActionSpace):
         """
         Get top k actions.
             - k = beam_size if the beam size is smaller than or equal to the beam action space size
@@ -56,7 +56,7 @@ def beam_search(
         assert full_size % batch_size == 0
         last_k = int(full_size / batch_size)
 
-        r_space, e_space = action_space.r_space,action_space.e_space
+        r_space, e_space = action_space.r_space, action_space.e_space
         action_space_size = r_space.size()[1]
         # => [batch_size, k'*action_space_size]
         log_action_dist = log_action_dist.view(batch_size, -1)
@@ -79,7 +79,7 @@ def beam_search(
         action_offset = (action_batch_offset + action_beam_offset).view(-1)
         return (next_r, next_e), log_action_prob, action_offset
 
-    def top_k_answer_unique(log_action_dist, action_space:ActionSpace):
+    def top_k_answer_unique(log_action_dist, action_space: ActionSpace):
         """
         Get top k unique entities
             - k = beam_size if the beam size is smaller than or equal to the beam action space size
@@ -94,7 +94,7 @@ def beam_search(
         full_size = len(log_action_dist)
         assert full_size % batch_size == 0
         last_k = int(full_size / batch_size)
-        r_space, e_space = action_space.r_space,action_space.e_space
+        r_space, e_space = action_space.r_space, action_space.e_space
         action_space_size = r_space.size()[1]
 
         r_space = r_space.view(batch_size, -1)
@@ -145,7 +145,7 @@ def beam_search(
     # Initialization
     r_s = int_fill_var_cuda(e_s.size(), kg.dummy_start_r)
     seen_nodes = int_fill_var_cuda(e_s.size(), kg.dummy_e).unsqueeze(1)
-    init_action = (r_s, e_s)
+    init_action = Action(r_s, e_s)
     # path encoder
     pn.initialize_path(init_action, kg)
     if kg.args.save_beam_search_paths:

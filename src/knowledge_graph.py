@@ -105,6 +105,11 @@ def answers_to_var(d_l):
     return d_v
 
 
+class Action(NamedTuple):
+    rel: torch.Tensor
+    ent: torch.Tensor
+
+
 class ActionSpace(NamedTuple):
     forks: List[Fork]
     r_space: torch.Tensor

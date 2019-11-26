@@ -13,7 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import src.utils.ops as ops
-from src.knowledge_graph import KnowledgeGraph, ActionSpace, Observation
+from src.knowledge_graph import KnowledgeGraph, ActionSpace, Observation, Action
 from src.utils.ops import var_cuda, zeros_var_cuda
 
 
@@ -121,7 +121,7 @@ class GraphWalkAgent(nn.Module):
         X2 = self.W2Dropout(X)
 
         def policy_nn_fun(X2, acs: ActionSpace):
-            A = self.get_action_embedding((acs.r_space, acs.e_space), kg)
+            A = self.get_action_embedding(Action(acs.r_space, acs.e_space), kg)
             action_dist = F.softmax(
                 torch.squeeze(A @ torch.unsqueeze(X2, 2), 2)
                 - (1 - acs.action_mask) * ops.HUGE_INT,
@@ -203,19 +203,21 @@ class GraphWalkAgent(nn.Module):
         action = BucketActions(action_spaces, action_dists, inv_offset, entropy)
 
         if merge_aspace_batching_outcome:
-            action_space = pad_and_cat_action_space(buckect_action_spaces, inv_offset, kg)
+            action_space = pad_and_cat_action_space(
+                buckect_action_spaces, inv_offset, kg
+            )
             action_dist = ops.pad_and_cat(action.action_dists, padding_value=0)[
                 inv_offset
             ]
             action = BucketActions([action_space], [action_dist], None, entropy)
         return action
 
-    def initialize_path(self, init_action, kg: KnowledgeGraph):
+    def initialize_path(self, action: Action, kg: KnowledgeGraph):
         # [batch_size, action_dim]
         if self.relation_only_in_path:
-            init_action_embedding = kg.get_relation_embeddings(init_action[0])
+            init_action_embedding = kg.get_relation_embeddings(action.rel)
         else:
-            init_action_embedding = self.get_action_embedding(init_action, kg)
+            init_action_embedding = self.get_action_embedding(action, kg)
         init_action_embedding.unsqueeze_(1)
         # [num_layers, batch_size, dim]
         init_h = zeros_var_cuda(
@@ -226,7 +228,7 @@ class GraphWalkAgent(nn.Module):
         )
         self.path = [self.path_encoder(init_action_embedding, (init_h, init_c))[1]]
 
-    def update_path(self, action, kg: KnowledgeGraph, offset=None):
+    def update_path(self, action: Action, kg: KnowledgeGraph, offset=None):
         """
         Once an action was selected, update the action history.
         :param action (r, e): (Variable:batch) indices of the most recent action
@@ -246,7 +248,7 @@ class GraphWalkAgent(nn.Module):
 
         # update action history
         if self.relation_only_in_path:
-            action_embedding = kg.get_relation_embeddings(action[0])
+            action_embedding = kg.get_relation_embeddings(action.rel)
         else:
             action_embedding = self.get_action_embedding(action, kg)
         if offset is not None:
@@ -420,7 +422,7 @@ class GraphWalkAgent(nn.Module):
         assert action_mask_min == 0 or action_mask_min == 1
         assert action_mask_max == 0 or action_mask_max == 1
 
-    def get_action_embedding(self, action, kg: KnowledgeGraph):
+    def get_action_embedding(self, action: Action, kg: KnowledgeGraph):
         """
         Return (batch) action embedding which is the concatenation of the embeddings of
         the traversed edge and the target node.
@@ -431,12 +433,11 @@ class GraphWalkAgent(nn.Module):
                 - e is the destination entity.
         :param kg: Knowledge graph enviroment.
         """
-        r, e = action
-        relation_embedding = kg.get_relation_embeddings(r)
+        relation_embedding = kg.get_relation_embeddings(action.rel)
         if self.relation_only:
             action_embedding = relation_embedding
         else:
-            entity_embedding = kg.get_entity_embeddings(e)
+            entity_embedding = kg.get_entity_embeddings(action.ent)
             action_embedding = torch.cat([relation_embedding, entity_embedding], dim=-1)
         return action_embedding
 

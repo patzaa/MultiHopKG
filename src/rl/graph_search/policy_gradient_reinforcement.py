@@ -6,10 +6,11 @@
  
  Policy gradient (REINFORCE algorithm) training and inference.
 """
+from typing import List
 
 import torch
 
-from src.knowledge_graph import KnowledgeGraph, ActionSpace, Observation
+from src.knowledge_graph import KnowledgeGraph, ActionSpace, Observation, Action
 from src.learn_framework import LFramework
 import src.rl.graph_search.beam_search as search
 import src.utils.ops as ops
@@ -131,8 +132,8 @@ class PolicyGradient(LFramework):
         seen_nodes = int_fill_var_cuda(e_s.size(), kg.dummy_e).unsqueeze(1)
         path_components = []
 
-        path_trace = [(r_s, e_s)]
-        agent.initialize_path((r_s, e_s), kg)
+        path_trace: List[Action] = [Action(r_s, e_s)]
+        agent.initialize_path(path_trace[0], kg)
 
         for t in range(num_steps):
             last_r, e = path_trace[-1]
@@ -141,12 +142,12 @@ class PolicyGradient(LFramework):
             ab: BucketActions = agent.transit(
                 e, obs, kg, self.use_action_space_bucketing
             )
-            next_r,next_e,action_prob = self.sample_action(ab)
-            agent.update_path((next_r,next_e), kg)
+            action, action_prob = self.sample_action(ab)
+            agent.update_path(action, kg)
             log_action_probs.append(ops.safe_log(action_prob))
             action_entropy.append(ab.entropy)
             seen_nodes = torch.cat([seen_nodes, e.unsqueeze(1)], dim=1)
-            path_trace.append((next_r,next_e))
+            path_trace.append(action)
 
         pred_e2 = path_trace[-1][1]
         self.record_path_trace(path_trace)
@@ -190,7 +191,7 @@ class PolicyGradient(LFramework):
             next_r = ops.batch_lookup(acsp.r_space, idx)
             next_e = ops.batch_lookup(acsp.e_space, idx)
             action_prob = ops.batch_lookup(action_dist, idx)
-            return next_r,next_e,action_prob
+            return Action(next_r, next_e), action_prob
 
         if ab.inv_offset is not None:
 
@@ -199,16 +200,15 @@ class PolicyGradient(LFramework):
             action_dist_list = []
             action_prob_list = []
             for action_space, action_dist in zip(ab.action_spaces, ab.action_dists):
-                next_r,next_e,action_prob = sample(action_space, action_dist)
-                next_r_list.append(next_r)
-                next_e_list.append(next_e)
+                action, action_prob = sample(action_space, action_dist)
+                next_r_list.append(action.rel)
+                next_e_list.append(action.ent)
                 action_prob_list.append(action_prob)
                 action_dist_list.append(action_dist)
             next_r = torch.cat(next_r_list, dim=0)[ab.inv_offset]
             next_e = torch.cat(next_e_list, dim=0)[ab.inv_offset]
-            action_sample = (next_r, next_e)
             action_prob = torch.cat(action_prob_list, dim=0)[ab.inv_offset]
-            sample_outcome = (next_r,next_e,action_prob)
+            sample_outcome = (Action(next_r, next_e), action_prob)
         else:
             sample_outcome = sample(ab.action_spaces[0], ab.action_dists[0])
 
