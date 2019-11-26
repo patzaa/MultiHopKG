@@ -77,7 +77,7 @@ def beam_search(
         )
         # [batch_size, k] => [batch_size*k]
         action_offset = (action_batch_offset + action_beam_offset).view(-1)
-        return (next_r, next_e), log_action_prob, action_offset
+        return Action(next_r, next_e), log_action_prob, action_offset
 
     def top_k_answer_unique(log_action_dist, action_space: ActionSpace):
         """
@@ -134,7 +134,7 @@ def beam_search(
             log_action_prob_list, padding_value=-ops.HUGE_INT
         )
         action_offset = ops.pad_and_cat(action_offset_list, padding_value=-1)
-        return (next_r, next_e), log_action_prob.view(-1), action_offset.view(-1)
+        return Action(next_r, next_e), log_action_prob.view(-1), action_offset.view(-1)
 
     def adjust_search_trace(search_trace, action_offset):
         for i, (r, e) in enumerate(search_trace):
@@ -149,7 +149,7 @@ def beam_search(
     # path encoder
     pn.initialize_path(init_action, kg)
     if kg.args.save_beam_search_paths:
-        search_trace = [(r_s, e_s)]
+        search_trace = [Action(r_s, e_s)]
 
     # Run beam search for num_steps
     # [batch_size*k], k=1
