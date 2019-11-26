@@ -339,7 +339,7 @@ class GraphWalkAgent(nn.Module):
 
         # Prevent the agent from selecting the ground truth edge
         ground_truth_edge_mask = self.get_ground_truth_edge_mask(
-            e, r_space, e_space, e_s, q, e_t, kg
+            e, r_space, e_space, obs, kg
         )
         action_mask -= ground_truth_edge_mask
         self.validate_action_mask(action_mask)
@@ -362,21 +362,24 @@ class GraphWalkAgent(nn.Module):
         return ActionSpace(acsp.forks, r_space, e_space, action_mask)
 
     def get_ground_truth_edge_mask(
-        self, current_nodes, r_space, e_space, e_s, q, e_t, kg: KnowledgeGraph
+        self, current_nodes, r_space, e_space, obs: Observation, kg: KnowledgeGraph
     ):
-        def build_ground_truth_mask(source_nodes, target_nodes, relation):
+        s_e = obs.source_entity
+        t_e = obs.target_entity
+        q = obs.query_relation
+
+        def build_mask(source_nodes, target_nodes, relation):
             return (
                 (current_nodes == source_nodes).unsqueeze(1)
                 * (r_space == relation.unsqueeze(1))
                 * (e_space == target_nodes.unsqueeze(1))
             )
 
-        ground_truth_edge_mask = build_ground_truth_mask(e_s, e_t, q)
+        mask = build_mask(s_e, t_e, q)
         inv_q = kg.get_inv_relation_id(q)
-        inv_ground_truth_edge_mask = build_ground_truth_mask(e_t, e_s, inv_q)
+        inv_mask = build_mask(t_e, s_e, inv_q)
         return (
-            (ground_truth_edge_mask + inv_ground_truth_edge_mask)
-            * (e_s.unsqueeze(1) != kg.dummy_e)
+            (mask + inv_mask) * (s_e.unsqueeze(1) != kg.dummy_e)
         ).float()
 
     def get_answer_mask(self, e_space, e_s, q, kg: KnowledgeGraph):
