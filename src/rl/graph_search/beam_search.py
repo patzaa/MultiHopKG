@@ -11,7 +11,7 @@ import torch
 
 import src.utils.ops as ops
 from src.knowledge_graph import Observation, ActionSpace
-from src.rl.graph_search.graph_walk_agent import ActionBatch
+from src.rl.graph_search.graph_walk_agent import BucketActions
 from src.utils.ops import (
     unique_max,
     var_cuda,
@@ -171,7 +171,7 @@ def beam_search(
         e_t = ops.tile_along_beam(e_t.view(batch_size, -1)[:, 0], k)
         obs = Observation(e_s, q, e_t, t == (num_steps - 1), last_r, seen_nodes)
         # one step forward in search
-        ab: ActionBatch = pn.transit(
+        ab: BucketActions = pn.transit(
             e,
             obs,
             kg,

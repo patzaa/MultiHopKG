@@ -13,7 +13,7 @@ from src.knowledge_graph import KnowledgeGraph, ActionSpace, Observation
 from src.learn_framework import LFramework
 import src.rl.graph_search.beam_search as search
 import src.utils.ops as ops
-from src.rl.graph_search.graph_walk_agent import GraphWalkAgent, ActionBatch
+from src.rl.graph_search.graph_walk_agent import GraphWalkAgent, BucketActions
 from src.utils.ops import int_fill_var_cuda, var_cuda, zeros_var_cuda
 
 
@@ -138,22 +138,15 @@ class PolicyGradient(LFramework):
             last_r, e = path_trace[-1]
             obs = Observation(e_s, q, e_t, t == (num_steps - 1), last_r, seen_nodes)
             # e_t is needed to form the ground_truth_edge_mask
-            ab: ActionBatch = agent.transit(
-                e, obs, kg, use_action_space_bucketing=self.use_action_space_bucketing
+            ab: BucketActions = agent.transit(
+                e, obs, kg, self.use_action_space_bucketing
             )
-            sample_outcome = self.sample_action(ab)
-            action = sample_outcome["action_sample"]
-            agent.update_path(action, kg)
-            action_prob = sample_outcome["action_prob"]
+            next_r,next_e,action_prob = self.sample_action(ab)
+            agent.update_path((next_r,next_e), kg)
             log_action_probs.append(ops.safe_log(action_prob))
             action_entropy.append(ab.entropy)
             seen_nodes = torch.cat([seen_nodes, e.unsqueeze(1)], dim=1)
-            path_trace.append(action)
-
-            if visualize_action_probs:
-                top_k_action = sample_outcome["top_actions"]
-                top_k_action_prob = sample_outcome["top_action_probs"]
-                path_components.append((e, top_k_action, top_k_action_prob))
+            path_trace.append((next_r,next_e))
 
         pred_e2 = path_trace[-1][1]
         self.record_path_trace(path_trace)
@@ -166,7 +159,7 @@ class PolicyGradient(LFramework):
             "path_components": path_components,
         }
 
-    def sample_action(self, ab: ActionBatch):
+    def sample_action(self, ab: BucketActions):
         """
         Sample an action based on current policy.
         :param inv_offset: Indexes for restoring original order in a batch.
@@ -190,7 +183,6 @@ class PolicyGradient(LFramework):
                 return action_dist
 
         def sample(acsp: ActionSpace, action_dist):
-            sample_outcome = {}
             sample_action_dist = apply_action_dropout_mask(
                 action_dist, acsp.action_mask
             )
@@ -198,9 +190,7 @@ class PolicyGradient(LFramework):
             next_r = ops.batch_lookup(acsp.r_space, idx)
             next_e = ops.batch_lookup(acsp.e_space, idx)
             action_prob = ops.batch_lookup(action_dist, idx)
-            sample_outcome["action_sample"] = (next_r, next_e)
-            sample_outcome["action_prob"] = action_prob
-            return sample_outcome
+            return next_r,next_e,action_prob
 
         if ab.inv_offset is not None:
 
@@ -209,18 +199,16 @@ class PolicyGradient(LFramework):
             action_dist_list = []
             action_prob_list = []
             for action_space, action_dist in zip(ab.action_spaces, ab.action_dists):
-                sample_outcome = sample(action_space, action_dist)
-                next_r_list.append(sample_outcome["action_sample"][0])
-                next_e_list.append(sample_outcome["action_sample"][1])
-                action_prob_list.append(sample_outcome["action_prob"])
+                next_r,next_e,action_prob = sample(action_space, action_dist)
+                next_r_list.append(next_r)
+                next_e_list.append(next_e)
+                action_prob_list.append(action_prob)
                 action_dist_list.append(action_dist)
             next_r = torch.cat(next_r_list, dim=0)[ab.inv_offset]
             next_e = torch.cat(next_e_list, dim=0)[ab.inv_offset]
             action_sample = (next_r, next_e)
             action_prob = torch.cat(action_prob_list, dim=0)[ab.inv_offset]
-            sample_outcome = {}
-            sample_outcome["action_sample"] = action_sample
-            sample_outcome["action_prob"] = action_prob
+            sample_outcome = (next_r,next_e,action_prob)
         else:
             sample_outcome = sample(ab.action_spaces[0], ab.action_dists[0])
 
