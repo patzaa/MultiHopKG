@@ -51,21 +51,6 @@ def build_forks(num_entities, e1_to_r_to_e2, bandwidth, page_rank_scores) -> Lis
     return [Fork(e1, get_action_space(e1)) for e1 in range(num_entities)]
 
 
-def vectorize_space(forks: List[Fork], action_space_size, dummy_r, dummy_e):
-    bucket_size = len(forks)
-    r_space = torch.zeros(bucket_size, action_space_size) + dummy_r
-    e_space = torch.zeros(bucket_size, action_space_size) + dummy_e
-    action_mask = torch.zeros(bucket_size, action_space_size)
-    for i, fork in enumerate(forks):
-        for j, direction in enumerate(fork.directions):
-            r_space[i, j] = direction.rel
-            e_space[i, j] = direction.ent
-            action_mask[i, j] = 1
-    return ActionSpace(
-        forks, int_var_cuda(r_space), int_var_cuda(e_space), var_cuda(action_mask)
-    )
-
-
 def build_buckets(forks: List[Fork], num_entities, args, dummy_r, dummy_e):
     bucketid2forks = collections.defaultdict(list)
     bucket_inbucket_ids = torch.zeros(num_entities, 2).long()
@@ -83,7 +68,7 @@ def build_buckets(forks: List[Fork], num_entities, args, dummy_r, dummy_e):
         )
     )
     bid2ActionSpace = {
-        b_id: vectorize_space(forks, b_id * args.bucket_interval, dummy_r, dummy_e)
+        b_id: ActionSpace.build(forks, b_id * args.bucket_interval, dummy_r, dummy_e)
         for b_id, forks in bucketid2forks.items()
     }
     return bucket_inbucket_ids, bid2ActionSpace
@@ -127,8 +112,24 @@ class ActionSpace(NamedTuple):
     action_mask: torch.Tensor
 
     def get_slice(self, idx):
-        d = {k: getattr(self, k)[idx] for k in self._fields if k!='forks'}
-        return ActionSpace(**d,forks=[self.forks[i] for i in idx])
+        assert isinstance(idx, list)
+        d = {k: getattr(self, k)[idx] for k in self._fields if k != "forks"}
+        return ActionSpace(**d, forks=[self.forks[i] for i in idx])
+
+    @staticmethod
+    def build(forks: List[Fork], action_space_size, dummy_r, dummy_e):
+        bucket_size = len(forks)
+        r_space = torch.zeros(bucket_size, action_space_size) + dummy_r
+        e_space = torch.zeros(bucket_size, action_space_size) + dummy_e
+        action_mask = torch.zeros(bucket_size, action_space_size)
+        for i, fork in enumerate(forks):
+            for j, direction in enumerate(fork.directions):
+                r_space[i, j] = direction.rel
+                e_space[i, j] = direction.ent
+                action_mask[i, j] = 1
+        return ActionSpace(
+            forks, int_var_cuda(r_space), int_var_cuda(e_space), var_cuda(action_mask)
+        )
 
 
 class Observation(NamedTuple):

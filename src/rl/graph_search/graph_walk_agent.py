@@ -16,6 +16,7 @@ import src.utils.ops as ops
 from src.knowledge_graph import KnowledgeGraph, ActionSpace, Observation
 from src.utils.ops import var_cuda, zeros_var_cuda
 
+
 class ActionBatch(NamedTuple):
     action_spaces: List[ActionSpace]
     action_dists: List[torch.Tensor]
@@ -29,14 +30,14 @@ def pad_and_cat_action_space(
     db_r_space, db_e_space, db_action_mask = [], [], []
     forks = []
     for acsp in action_spaces:
-        forks+=acsp.forks
+        forks += acsp.forks
         db_r_space.append(acsp.r_space)
         db_e_space.append(acsp.e_space)
         db_action_mask.append(acsp.action_mask)
     r_space = ops.pad_and_cat(db_r_space, padding_value=kg.dummy_r)[inv_offset]
     e_space = ops.pad_and_cat(db_e_space, padding_value=kg.dummy_e)[inv_offset]
     action_mask = ops.pad_and_cat(db_action_mask, padding_value=0)[inv_offset]
-    action_space = ActionSpace(forks,r_space, e_space, action_mask)
+    action_space = ActionSpace(forks, r_space, e_space, action_mask)
     return action_space
 
 
@@ -297,44 +298,42 @@ class GraphWalkAgent(nn.Module):
             which is used later to restore the output results to the original order.
         """
         db_action_spaces, db_references = [], []
+        assert not collapse_entities  # NotImplementedError
+        bucket_ids, inbucket_ids = kg.get_bucket_and_inbucket_ids(current_entity)
 
-        if collapse_entities:
-            raise NotImplementedError
-        else:
-            bucket_ids, inbucket_ids = kg.get_bucket_and_inbucket_ids(current_entity)
-            bucketkey2entities = self.build_buckedkey2entities_mapping(bucket_ids)
+        for b_key in set(bucket_ids.tolist()):
+            inthisbucket_indices = (
+                torch.nonzero(bucket_ids.eq(b_key)).squeeze().tolist()
+            )
+            # ents_inthis_bucket = [fo.ent for fo in bucket_action_space.forks]
+            if not isinstance(inthisbucket_indices, list):  # TODO(tilo) wtf!
+                inthisbucket_indices = [inthisbucket_indices]
 
-            for b_key, entities_inthisbucket in bucketkey2entities.items():
-                bucket_action_space = kg.bucketid2ActionSpace[b_key]
-                inbucket_ids_of_entities_inthisbucket = inbucket_ids[
-                    entities_inthisbucket
-                ].tolist()
-                e_b = current_entity[entities_inthisbucket]
+            inbucket_ids_of_entities_inthisbucket = inbucket_ids[
+                inthisbucket_indices
+            ].tolist()
+            if not isinstance(inbucket_ids_of_entities_inthisbucket, list):
+                print(inbucket_ids_of_entities_inthisbucket)
+                assert False
+            e_b = current_entity[inthisbucket_indices]
 
-                obs_b = obs.get_slice(entities_inthisbucket)
+            obs_b = obs.get_slice(inthisbucket_indices)
 
-                bucket_action_space_sliced = bucket_action_space.get_slice(
-                    inbucket_ids_of_entities_inthisbucket
-                )
-                action_space_b = self.apply_action_masks(
-                    bucket_action_space_sliced, e_b, obs_b, kg
-                )
-                db_action_spaces.append(action_space_b)
-                db_references.append(entities_inthisbucket)
+            bucket_action_space = kg.bucketid2ActionSpace[b_key]
+            bucket_action_space_sliced = bucket_action_space.get_slice(
+                inbucket_ids_of_entities_inthisbucket
+            )
+            action_space_b = self.apply_action_masks(
+                bucket_action_space_sliced, e_b, obs_b, kg
+            )
+            db_action_spaces.append(action_space_b)
+            db_references.append(inthisbucket_indices)
 
         return db_action_spaces, db_references
 
-    def build_buckedkey2entities_mapping(self, bucket_ids):
-        bucketkey2entities = {}
-        for i, b_key in enumerate(bucket_ids.tolist()):
-            b_key = int(b_key)
-            if b_key not in bucketkey2entities:
-                bucketkey2entities[b_key] = [i]
-            else:
-                bucketkey2entities[b_key].append(i)
-        return bucketkey2entities
-
-    def apply_action_masks(self, acsp:ActionSpace, e, obs, kg: KnowledgeGraph):
+    def apply_action_masks(
+        self, acsp: ActionSpace, e, obs: Observation, kg: KnowledgeGraph
+    ):
         r_space, e_space, action_mask = acsp.r_space, acsp.e_space, acsp.action_mask
         e_s, q, e_t, last_step, last_r, seen_nodes = obs
 
@@ -360,22 +359,21 @@ class GraphWalkAgent(nn.Module):
         # loop_mask_b = (((seen_nodes_b.unsqueeze(1) == e_space.unsqueeze(2)).sum(2) > 0) *
         #      (r_space != NO_OP_RELATION_ID)).float()
         # action_mask *= (1 - loop_mask_b)
-        return ActionSpace(acsp.forks,r_space, e_space, action_mask)
+        return ActionSpace(acsp.forks, r_space, e_space, action_mask)
 
     def get_ground_truth_edge_mask(
-        self, e, r_space, e_space, e_s, q, e_t, kg: KnowledgeGraph
+        self, current_nodes, r_space, e_space, e_s, q, e_t, kg: KnowledgeGraph
     ):
-        ground_truth_edge_mask = (
-            (e == e_s).unsqueeze(1)
-            * (r_space == q.unsqueeze(1))
-            * (e_space == e_t.unsqueeze(1))
-        )
+        def build_ground_truth_mask(source_nodes, target_nodes, relation):
+            return (
+                (current_nodes == source_nodes).unsqueeze(1)
+                * (r_space == relation.unsqueeze(1))
+                * (e_space == target_nodes.unsqueeze(1))
+            )
+
+        ground_truth_edge_mask = build_ground_truth_mask(e_s, e_t, q)
         inv_q = kg.get_inv_relation_id(q)
-        inv_ground_truth_edge_mask = (
-            (e == e_t).unsqueeze(1)
-            * (r_space == inv_q.unsqueeze(1))
-            * (e_space == e_s.unsqueeze(1))
-        )
+        inv_ground_truth_edge_mask = build_ground_truth_mask(e_t, e_s, inv_q)
         return (
             (ground_truth_edge_mask + inv_ground_truth_edge_mask)
             * (e_s.unsqueeze(1) != kg.dummy_e)
