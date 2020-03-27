@@ -765,9 +765,10 @@ def run_experiment(args):
 if __name__ == '__main__':
     import shlex
 
-    argString = '''
-     --data_dir data/NELL-995     --train     --model point     --bandwidth 256     --entity_dim 200     --relation_dim 200     --history_dim 200     --history_num_layers 3     --num_rollouts 20     --num_rollout_steps 3     --bucket_interval 5     --num_epochs 1000     --num_wait_epochs 100     --num_peek_epochs 2     --batch_size 128     --train_batch_size 128     --dev_batch_size 16     --margin -1     --learning_rate 0.001     --baseline n/a     --grad_norm 5     --emb_dropout_rate 0.3     --ff_dropout_rate 0.1     --action_dropout_rate 0.3     --action_dropout_anneal_interval 1000          --beta 0.05     --beam_size 128     --num_paths_per_entity -1          --use_action_space_bucketing     --gpu 0
-    '''
-    args = parser.parse_args(shlex.split(argString))
+    #argString = '''
+    # --data_dir data/NELL-995     --train     --model point     --bandwidth 256     --entity_dim 200     --relation_dim 200     --history_dim 200     --history_num_layers 3     --num_rollouts 20     --num_rollout_steps 3     --bucket_interval 5     --num_epochs 1000     --num_wait_epochs 100     --num_peek_epochs 2     --batch_size 128     --train_batch_size 128     --dev_batch_size 16     --margin -1     --learning_rate 0.001     --baseline n/a     --grad_norm 5     --emb_dropout_rate 0.3     --ff_dropout_rate 0.1     --action_dropout_rate 0.3     --action_dropout_anneal_interval 1000          --beta 0.05     --beam_size 128     --num_paths_per_entity -1          --use_action_space_bucketing     --gpu 0
+    #'''
+    #argString = ' --data_dir ../data/umls     --train     --model point     --bandwidth 400     --entity_dim 200     --relation_dim 200     --history_dim 200     --history_num_layers 3     --num_rollouts 20     --num_rollout_steps 2     --bucket_interval 10     --num_epochs 3     --num_wait_epochs 200     --num_peek_epochs 2     --batch_size 128     --train_batch_size 128     --dev_batch_size 32     --margin 1     --learning_rate 0.001     --baseline n/a     --grad_norm 0     --emb_dropout_rate 0.3     --ff_dropout_rate 0.1     --action_dropout_rate 0.9     --action_dropout_anneal_interval 1000          --beta 0.05     --beam_size 128     --num_paths_per_entity -1          --use_action_space_bucketing     --gpu 0'
+    #args = parser.parse_args(shlex.split(argString))
 
     run_experiment(args)

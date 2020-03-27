@@ -95,7 +95,7 @@ class Args:
     add_reversed_training_edges = True
     train_entire_graph = False
     emb_dropout_rate = 0.3
-    num_epochs=200
+    num_epochs=50
     num_wait_epochs= 500
     num_peek_epochs= 2
     start_epoch= 0
@@ -103,7 +103,7 @@ class Args:
     train_batch_size= 32
     dev_batch_size= 64
     margin= 0.05
-    learning_rate= 0.003
+    learning_rate= 0.0003
     learning_rate_decay= 1.0
     adam_beta1= 0.9
     adam_beta2= 0.999
