@@ -87,7 +87,7 @@ class Args:
     gpu = 0
     group_examples_by_query = True
     model='conve'
-    entity_dim= 200
+    entity_dim= 100
     relation_dim= 200
     history_dim= 400
     history_num_layers= 3
