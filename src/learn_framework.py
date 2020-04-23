@@ -10,6 +10,7 @@ import abc
 import os
 import random
 import shutil
+import pandas
 from tqdm import tqdm
 
 import numpy as np
@@ -65,9 +66,17 @@ class LFramework(nn.Module):
         print("--------------------------")
         print()
 
-    def run_train(self, train_data, dev_data):
-        self.print_all_model_parameters()
 
+    def run_train(self, train_data, dev_data):
+        lst_rank1 = []
+        lst_rank3 = []
+        lst_rank5 = []
+        lst_rank10 = []
+        lst_epoch = []
+        lst_mrr = []
+        self.print_all_model_parameters()
+        Loss_epoch_data = []
+        #tensorboard_writer = SummaryWriter(log_dir='..User/daniel/MultiHopKG/tensorboard', max_queue=1, flush_secs=30)
         if self.optim is None:
             self.optim = optim.Adam(
                 filter(lambda p: p.requires_grad, self.parameters()),
@@ -79,11 +88,13 @@ class LFramework(nn.Module):
         dev_metrics_history = []
 
         for epoch_id in range(self.start_epoch, self.num_epochs):
+
+
             print("Epoch {}".format(epoch_id))
             if self.rl_variation_tag.startswith("rs"):
                 # Reward shaping module sanity check:
                 #   Make sure the reward shaping module output value is in the correct range
-                train_scores = self.test_fn(train_data)
+                train_scores = self._fn(train_data)
                 dev_scores = self.test_fn(dev_data)
                 print(
                     "Train set average fact score: {}".format(
@@ -136,6 +147,18 @@ class LFramework(nn.Module):
             stdout_msg = "Epoch {}: average training loss = {}".format(
                 epoch_id, np.mean(batch_losses)
             )
+            #saving average traing loss list
+            data = (epoch_id, np.mean(batch_losses))
+            Loss_epoch_data.append(data)
+            if epoch_id == self.num_epochs-1:
+                '''
+                with open("/Users/daniel/MultiHopKG/tensorboard/avgLoss.csv", "w") as f:
+                    writer = csv.writer(f, lineterminator='\n')
+                    writer.writerows(Loss_epoch_data)
+                '''
+
+
+
             if entropies:
                 stdout_msg += " entropy = {}".format(np.mean(entropies))
             print(stdout_msg)
@@ -150,21 +173,36 @@ class LFramework(nn.Module):
                 print("* Analysis: false negative ratio = {}".format(fn_ratio))
 
             # Check dev set performance
+
+
             if self.run_analysis or (
-                epoch_id > 0 and epoch_id % self.num_peek_epochs == 0
+                epoch_id > 0 and epoch_id % self.num_peek_epochs-1 == 0
             ):
                 self.eval()
                 self.batch_size = self.dev_batch_size
                 dev_scores = self.forward(dev_data, verbose=False)
                 print("Dev set performance: (correct evaluation)")
-                _, _, _, _, mrr = src.eval.hits_and_ranks(
+                rank1, rank3, rank5, rank10, mrr = src.eval.hits_and_ranks(
                     dev_data, dev_scores, self.kg.dev_objects, verbose=True
                 )
+
+
+
+
+                lst_epoch.append(epoch_id)
+                lst_rank1.append(rank1)
+                lst_rank3.append(rank3)
+                lst_rank5.append(rank5)
+                lst_rank10.append(rank10)
+                lst_mrr.append(mrr)
                 metrics = mrr
                 print("Dev set performance: (include test set labels)")
                 src.eval.hits_and_ranks(
                     dev_data, dev_scores, self.kg.all_objects, verbose=True
                 )
+
+
+
                 # Action dropout anneaking
                 if self.model.startswith("point"):
                     eta = self.action_dropout_anneal_interval
@@ -179,6 +217,7 @@ class LFramework(nn.Module):
                             )
                         )
                 # Save checkpoint
+
                 if metrics > best_dev_metrics:
                     self.save_checkpoint(
                         checkpoint_id=epoch_id, epoch_id=epoch_id, is_best=True
@@ -220,7 +259,13 @@ class LFramework(nn.Module):
                             o_f.write("{}\n".format(hit_ratio))
                         with open(fn_ratio_file, "a") as o_f:
                             o_f.write("{}\n".format(fn_ratio))
-
+                if epoch_id == self.num_epochs-1:
+                    df = pandas.DataFrame(data={"Rank@1": lst_rank1, "Rank@3": lst_rank3,
+                              "Rank@5": lst_rank5, "Rank@10": lst_rank10, "mrr": lst_mrr,
+                              "epoch": lst_epoch})
+                    df.to_csv("/Users/daniel/MultiHopKG/tensorboard/rank_mrr.csv",
+                              sep=',', index=False)
+                    print('hello')
     @abc.abstractmethod
     def loss(self, mini_batch):
         raise NotImplementedError

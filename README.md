@@ -36,7 +36,7 @@ and run the following command to preprocess the datasets.
 `<dataset>` is the name of any dataset folder in the `./data` directory. In our experiments, the five datasets used are: `umls`, `kinship`, `fb15k-237`, `wn18rr` and `nell-995`. 
 `<gpu-ID>` is a non-negative integer number representing the GPU index.
 
-### Train models
+###  models
 Then the following commands can be used to train the proposed models and baselines in the paper. By default, dev set evaluation results will be printed when training terminates.
 
 1. Train embedding-based models

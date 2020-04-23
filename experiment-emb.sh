@@ -8,7 +8,7 @@ exp=$2
 gpu=$3
 ARGS=${@:4}
 
-add_reversed_training_edges_flag=''
+add_reversed__edges_flag=''
 if [[ $add_reversed_training_edges = *"True"* ]]; then
     add_reversed_training_edges_flag="--add_reversed_training_edges"
 fi
@@ -20,7 +20,7 @@ fi
 cmd="python3 -m src.experiments \
     --data_dir $data_dir \
     $exp \
-    --model $model \
+    --model $≈çmodel \
     --entity_dim $entity_dim \
     --relation_dim $relation_dim \
     --num_rollouts $num_rollouts \
