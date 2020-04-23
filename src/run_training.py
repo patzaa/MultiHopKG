@@ -87,23 +87,23 @@ class Args:
     gpu = 0
     group_examples_by_query = True
     model='conve'
-    entity_dim= 100
+    entity_dim= 200
     relation_dim= 200
-    history_dim= 400
-    history_num_layers= 3
+    #history_dim= 400
+    #history_num_layers= 3
     add_reverse_relations= True,
     add_reversed_training_edges = True
     train_entire_graph = False
     emb_dropout_rate = 0.3
-    num_epochs=50
+    num_epochs= 10
     num_wait_epochs= 500
-    num_peek_epochs= 2
+    num_peek_epochs= 2 #evaluation each second episode
     start_epoch= 0
     batch_size= 512
     train_batch_size= 32
     dev_batch_size= 64
     margin= 0.05
-    learning_rate= 0.0003
+    learning_rate= 0.003
     learning_rate_decay= 1.0
     adam_beta1= 0.9
     adam_beta2= 0.999
@@ -143,6 +143,7 @@ if __name__ == '__main__':
         train_data = data_utils.load_triples(
             train_path, entity_index_path, relation_index_path, group_examples_by_query=args.group_examples_by_query,
             add_reverse_relations=args.add_reversed_training_edges)
+
 
         seen_entities = set()
         dev_data = data_utils.load_triples(dev_path, entity_index_path, relation_index_path, seen_entities=seen_entities)
